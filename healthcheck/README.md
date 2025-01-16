@@ -28,7 +28,7 @@ make lint-healthcheck
 ### Serving the app locally
 
 ```shell
-bundle exec puma -p 8080
+bundle exec rackup -o 0.0.0.0 -p 8080
 ```
 
 Then access the site at [http://localhost:8080/](http://localhost:8080/)

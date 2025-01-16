@@ -25,7 +25,7 @@ fi
   export LOGGING_DB="/tmp/logging.db"
   create_databases
   cd /api-stubs
-  bundle exec puma -p 80 &
+  bundle exec rackup -o 0.0.0.0 -p 80 &
 )
 
 echo "start authentication and logging api stubs"
@@ -36,7 +36,7 @@ do
 done
 
 echo "start radius server"
-cd /healthcheck && bundle exec puma -p 3000 &
+cd /healthcheck && bundle exec rackup -o 0.0.0.0 -p 3000 &
 /usr/local/sbin/radiusd -X &
 while [ $(curl --write-out '%{http_code}' --silent --output /dev/null 127.0.0.1:3000) -ne 200 ]
 do
