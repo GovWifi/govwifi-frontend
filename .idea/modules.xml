@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/api-stubs.iml" filepath="$PROJECT_DIR$/.idea/modules/api-stubs.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/govwifi-frontend.iml" filepath="$PROJECT_DIR$/.idea/govwifi-frontend.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/healthcheck.iml" filepath="$PROJECT_DIR$/.idea/modules/healthcheck.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/test-app.iml" filepath="$PROJECT_DIR$/.idea/modules/test-app.iml" />
+    </modules>
+  </component>
+</project>
