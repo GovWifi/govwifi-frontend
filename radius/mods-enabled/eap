@@ -5,7 +5,7 @@
 		cisco_accounting_username_bug = no
 		max_sessions = 4096
 		tls {
-			tls_debug = 3
+			tls_debug = 1
 			cipher_list = "ALL"
 			tls_min_version = "1.0"
 			certificate_file = ${certdir}/server.pem
