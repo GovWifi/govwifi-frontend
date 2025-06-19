@@ -1,0 +1,59 @@
+--- ./src/modules/rlm_eap/mem.c	2025-01-31 11:42:21
++++ ./src/modules/rlm_eap/mem.c	2025-06-16 21:41:12
+@@ -38,6 +38,8 @@
+ #define PTHREAD_MUTEX_UNLOCK(_x)
+ #endif
+ 
++int session_count = 0;
++
+ static eap_handler_t *eaplist_delete(rlm_eap_t *inst, REQUEST *request,
+ 				     eap_handler_t *handler, char const *msg, bool delete);
+ 
+@@ -247,7 +249,33 @@
+ 	return NULL;
+ }
+ 
++typedef struct {
++    time_t now;
++    uint32_t timer_limit;
++    int count;
++} count_context_t;
+ 
++static int count_active_session_cb(void *ctx, void *data) {
++    count_context_t *context = (count_context_t *) ctx;
++    eap_handler_t *handler = (eap_handler_t *) data;
++
++    if ((context->now - handler->timestamp) <= (int)context->timer_limit) {
++        context->count++;
++    }
++    return 0; // continue walking
++}
++
++int count_sessions(rbtree_t *tree, time_t now, uint32_t timer_limit) {
++    count_context_t context = {
++        .now = now,
++        .timer_limit = timer_limit,
++        .count = 0
++    };
++
++    rbtree_walk(tree, RBTREE_PRE_ORDER, count_active_session_cb, &context);
++    return context.count;
++}
++
+ static void eaplist_expire(rlm_eap_t *inst, REQUEST *request, time_t timestamp)
+ {
+ 	int i;
+@@ -314,6 +342,13 @@
+ 	/*
+ 	 *	If we have a DoS attack, discard new sessions.
+ 	 */
++
++	int new_session_count = count_sessions(inst->session_tree, handler->timestamp, inst->timer_limit);
++	if (session_count != new_session_count) {
++	    INFO("NUMBER OF OPEN SESSIONS: %d\n", new_session_count);
++	    session_count = new_session_count;
++    }
++
+ 	if (rbtree_num_elements(inst->session_tree) >= inst->max_sessions) {
+ 		status = -1;
+ 		eaplist_expire(inst, request, handler->timestamp);

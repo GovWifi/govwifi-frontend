@@ -3,11 +3,12 @@ FROM ruby:3.3.6-alpine
 RUN apk --update --no-cache add wpa_supplicant openssl make gcc libc-dev curl talloc-dev jq g++ zlib-dev \
                                 openssl-dev ca-certificates linux-headers python3 py3-pip py3-wheel net-tools tmux sqlite-libs \
                                 sqlite sqlite-dev libxml2 curl-dev json-c-dev libmemcached-dev \
-                                mariadb-connector-c-dev py-watchdog
+                                mariadb-connector-c-dev py-watchdog patch
 
-RUN wget https://github.com/FreeRADIUS/freeradius-server/releases/download/release_3_2_2/freeradius-server-3.2.2.tar.gz \
-    && tar xzvf freeradius-server-3.2.2.tar.gz \
-    && cd freeradius-server-3.2.2 \
+COPY session.patch /tmp
+
+RUN wget https://github.com/FreeRADIUS/freeradius-server/releases/download/release_3_2_2/freeradius-server-3.2.2.tar.gz
+RUN tar xzvf freeradius-server-3.2.2.tar.gz && cd freeradius-server-3.2.2 && patch -p1 < /tmp/session.patch \
     && ./configure CPPFLAGS=-DX509_V_FLAG_PARTIAL_CHAIN=1 --sysconfdir=/etc \
     && make \
     && make install
