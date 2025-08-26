@@ -1,0 +1,4 @@
+python tlsver {
+  module = /etc/raddb/mods-config/python/tls_version.py
+  python_path = /etc/raddb/mods-config/python
+}

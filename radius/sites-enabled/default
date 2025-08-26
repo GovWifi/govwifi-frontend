@@ -44,6 +44,11 @@ accounting {
 session {
 }
 post-auth {
+  # Capture TLS version for all TLS-based EAP methods
+  if (&EAP-Type =~ /^(TLS|PEAP|TTLS)$/) {
+    tlsver
+  }
+
  if (EAP-Type == TLS)  {
    redundant {
      rest
