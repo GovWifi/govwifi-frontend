@@ -5,15 +5,13 @@ require 'sqlite3'
 require "govwifi_eapoltest"
 require "_spec_helper"
 
-# RSpec.shared_examples "it rejects authentication attempt" do |command|
-#   let(:command) { command }
-#   it "does not reach the authentication api or the logging api and rejects access" do
-#     output = `#{command}`
-#     expect(LoggingLine.all).to be_empty
-#     expect(AuthLine.all).to be_empty
-#     expect(output).to include("Access-Reject")
-#   end
-# end
+RSpec.shared_examples "it rejects authentication attempt" do |command|
+  let(:command) { command }
+  it "nd rejects access" do
+    output = `#{command}`
+    expect(output).to include("Access-Reject")
+  end
+end
 
 RSpec.describe 'test' do
   PAP_CMD = "radtest testing password localhost 0 testing123"
@@ -46,7 +44,11 @@ RSpec.describe 'test' do
   it "logs a successful authentication attempt" do
     expect {
       eapol_test.run_peap_mschapv2(username:, password:)
-    }.to change { LoggingLine.all.count }.by(1)
+    }.to change {
+      # puts("\n\n-- HERE --------------------------\n")
+      # bindings.irb
+      LoggingLine.all.count
+    }.by(1)
   end
 
 end

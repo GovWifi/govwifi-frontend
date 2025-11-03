@@ -30,7 +30,9 @@ class ApiStub < Sinatra::Base
 
   post "/logging/post-auth" do
     request.body.rewind
-    line = LoggingLine.create(JSON.parse(request.body.read))
+    json_data = request.body.read
+    puts "\n\n-- Received logging data ----------------------------------------------\n#{json_data}\n\n"
+    line = LoggingLine.create(JSON.parse(json_data))
     puts "** #{line.to_hash}"
     content_type :json
     status 204
