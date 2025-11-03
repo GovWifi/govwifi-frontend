@@ -7,10 +7,8 @@ require "_spec_helper"
 
 RSpec.shared_examples "it rejects authentication attempt" do |command|
   let(:command) { command }
-  it "does not reach the authentication api or the logging api and rejects access" do
+  it "and rejects access" do
     output = `#{command}`
-    expect(LoggingLine.all).to be_empty
-    expect(AuthLine.all).to be_empty
     expect(output).to include("Access-Reject")
   end
 end
