@@ -44,11 +44,7 @@ RSpec.describe 'test' do
   it "logs a successful authentication attempt" do
     expect {
       eapol_test.run_peap_mschapv2(username:, password:)
-    }.to change {
-      # puts("\n\n-- HERE --------------------------\n")
-      # bindings.irb
-      LoggingLine.all.count
-    }.by(1)
+    }.to change { LoggingLine.all.count }.by(1)
   end
 
 end

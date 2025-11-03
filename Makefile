@@ -15,7 +15,7 @@ clean:
 	rm -rf $(TEST_APP_PATH)/test-cert
 
 test: clean build certs
-	docker run $(DOCKER_FLAGS) --rm -it -v=$(CERTIFICATE_PATH):/certificates -v=$(CURDIR)/radius:/etc/raddb -v=$(CURDIR)/radius/certs:/etc/raddb/certs -v=$(TRUSTED_CERTIFICATES_PATH):/etc/raddb/certs/trusted_certificates -p 1812-1813:1812-1813/udp -p 3000:3000 -p 9812:9812 --name govwifi-frontend-c govwifi-frontend /usr/bin/run-tests.sh
+	docker run $(DOCKER_FLAGS) --rm  -v=$(CERTIFICATE_PATH):/certificates -v=$(CURDIR)/radius:/etc/raddb -v=$(CURDIR)/radius/certs:/etc/raddb/certs -v=$(TRUSTED_CERTIFICATES_PATH):/etc/raddb/certs/trusted_certificates -p 1812-1813:1812-1813/udp -p 3000:3000 -p 9812:9812 --name govwifi-frontend-c govwifi-frontend /usr/bin/run-tests.sh
 
 lint: build
 	docker run $(DOCKER_FLAGS) --rm -v=$(CURDIR)/radius:/etc/raddb -v=$(CURDIR)/radius/certs:/etc/raddb/certs -p 1812-1813:1812-1813/udp -p 3000:3000 -p 9812:9812 govwifi-frontend /bin/sh -c "cd /healthcheck && bundle exec rubocop -d"
