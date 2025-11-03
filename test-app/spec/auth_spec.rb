@@ -7,7 +7,7 @@ require "_spec_helper"
 
 RSpec.shared_examples "it rejects authentication attempt" do |command|
   let(:command) { command }
-  it "nd rejects access" do
+  it "and rejects access" do
     output = `#{command}`
     expect(output).to include("Access-Reject")
   end
