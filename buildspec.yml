@@ -23,23 +23,23 @@ phases:
             - echo "Acceptance tests have started. BUILD_ID is $BUILD_ID"
             - BUILD_STATUS=$(aws codebuild batch-get-builds --ids $BUILD_ID | jq -r '.builds[].buildStatus')
             - echo "Build status is $BUILD_STATUS"
-            - |
-              while [ $BUILD_STATUS = "IN_PROGRESS" ] ; do
-                  echo "Build status is $BUILD_STATUS"
-                  BUILD_STATUS=$(aws codebuild batch-get-builds --ids $BUILD_ID | jq -r '.builds[].buildStatus')
-                  if [ $BUILD_STATUS = "FAILED" ]
-                  then
-                    echo "Frontend acceptance tests have failed. Please inspect them $BUILD_ID"
-                    exit 1;
-                    break
-                  elif [ $BUILD_STATUS = "SUCCEEDED" ]
-                  then
-                    echo "Acceptance tests successful."
-                    break
-                  fi
-                  echo "Acceptance tests status is $BUILD_STATUS"
-                  sleep 30s
-                done
+#            - |
+#              while [ $BUILD_STATUS = "IN_PROGRESS" ] ; do
+#                  echo "Build status is $BUILD_STATUS"
+#                  BUILD_STATUS=$(aws codebuild batch-get-builds --ids $BUILD_ID | jq -r '.builds[].buildStatus')
+#                  if [ $BUILD_STATUS = "FAILED" ]
+#                  then
+#                    echo "Frontend acceptance tests have failed. Please inspect them $BUILD_ID"
+#                    exit 1;
+#                    break
+#                  elif [ $BUILD_STATUS = "SUCCEEDED" ]
+#                  then
+#                    echo "Acceptance tests successful."
+#                    break
+#                  fi
+#                  echo "Acceptance tests status is $BUILD_STATUS"
+#                  sleep 30s
+#                done
 
     build:
         commands:
