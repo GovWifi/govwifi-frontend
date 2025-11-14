@@ -4,8 +4,6 @@
 		ignore_unknown_eap_types = no
 		cisco_accounting_username_bug = no
 		max_sessions = 16384
-
-		# ------ this is a test -----------
 		tls {
 			tls_debug = 3
 			debug = 3
