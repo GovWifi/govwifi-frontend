@@ -2,3 +2,4 @@
 test-app/test-cert/
 test-app/spec/fixtures/certificates/
 test-app/spec/fixtures/trusted_certificates/
+.idea/
