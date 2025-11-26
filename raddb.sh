@@ -19,7 +19,7 @@ if ! (unzip -t ${CERTSDIR}/certificates.zip); then
   exit 1;
 fi
 
-unzip ${CERTSDIR}/certificates.zip -d ${CERTSDIR}/trusted_certificates
+unzip -o ${CERTSDIR}/certificates.zip -d ${CERTSDIR}/trusted_certificates
 rm -f ${CERTSDIR}/certificates.zip
 
 exec "$@"
