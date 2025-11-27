@@ -19,6 +19,9 @@ if ! (unzip -t ${CERTSDIR}/certificates.zip); then
   exit 1;
 fi
 
+# The '-o' option is used to overwrite existing files without prompting. The
+# Dockerfile.rddb uses this script in the testing environment. I've added this
+# option to remove error messages about unzip not overwriting existing files.
 unzip -o ${CERTSDIR}/certificates.zip -d ${CERTSDIR}/trusted_certificates
 rm -f ${CERTSDIR}/certificates.zip
 
