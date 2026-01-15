@@ -26,7 +26,8 @@ GEM
     json (2.9.1)
     language_server-protocol (3.17.0.4)
     logger (1.7.0)
-    minitest (5.25.4)
+    minitest (6.0.1)
+      prism (~> 1.5)
     mustermann (3.0.4)
       ruby2_keywords (~> 0.0.1)
     nio4r (2.7.4)
@@ -34,6 +35,7 @@ GEM
     parser (3.3.7.0)
       ast (~> 2.4.1)
       racc
+    prism (1.8.0)
     puma (6.6.0)
       nio4r (~> 2.0)
     racc (1.8.1)
@@ -92,7 +94,7 @@ GEM
       concurrent-ruby (~> 1.0)
     unicode-display_width (3.1.4)
       unicode-emoji (~> 4.0, >= 4.0.4)
-    unicode-emoji (4.0.4)
+    unicode-emoji (4.2.0)
     uri (1.0.4)
 
 PLATFORMS
@@ -105,7 +107,7 @@ DEPENDENCIES
   sinatra
 
 RUBY VERSION
-   ruby 3.4.7p58
+  ruby 4.0.1
 
 BUNDLED WITH
-   2.6.9
+  4.0.3
