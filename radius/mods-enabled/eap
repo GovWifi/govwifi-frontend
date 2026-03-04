@@ -6,7 +6,7 @@
 		max_sessions = 16384
 		tls {
 			cipher_list = "ALL"
-			tls_min_version = "1.0"
+			tls_min_version = "1.2"
 			certificate_file = ${certdir}/server.pem
 			private_key_password = whatever
 			private_key_file = ${certdir}/server.key
