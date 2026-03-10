@@ -45,6 +45,13 @@ server default {
             }
         }
 
+        Post-Auth-Type REJECT {
+          redundant {
+            rest
+            fail
+          }
+        }
+
         update {
             &reply:TLS-Session-Version := &session-state:TLS-Session-Version
             &reply:TLS-Session-Cipher-Suite := &session-state:TLS-Session-Cipher-Suite
