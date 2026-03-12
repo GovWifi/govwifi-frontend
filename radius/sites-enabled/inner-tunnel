@@ -1,34 +1,50 @@
 server inner-tunnel {
-authorize {
-	filter_username
-	eap {
-		ok = return
-	}
-	rest
-}
-authenticate {
-	Auth-Type MS-CHAP {
-		mschap
-	}
-	eap
-}
-session {
-}
-post-auth {
-  redundant {
-    rest
-    ok
-  }
-  Post-Auth-Type REJECT {
-    redundant {
-      rest
-      fail
+    authorize {
+        filter_username
+        eap {
+            ok = return
+        }
+        rest
     }
-  }
-}
-pre-proxy {
-}
-post-proxy {
-	eap
-}
+
+    authenticate {
+        Auth-Type MS-CHAP {
+            mschap
+        }
+        eap
+    }
+
+    session {
+    }
+
+    post-auth {
+        redundant {
+            rest
+            ok
+        }
+
+        if ("%{session-state:TLS-Session-Version}" != "") {
+      		update outer.session-state {
+      			TLS-Session-Version := "%{session-state:TLS-Session-Version}"
+      		}
+      	} elsif ("%{reply:TLS-Session-Version}" != "") {
+      		update outer.session-state {
+      			TLS-Session-Version := "%{reply:TLS-Session-Version}"
+      		}
+      	}
+
+        Post-Auth-Type REJECT {
+            redundant {
+                rest
+                fail
+            }
+        }
+    }
+
+    pre-proxy {
+    }
+
+    post-proxy {
+        eap
+    }
 }
