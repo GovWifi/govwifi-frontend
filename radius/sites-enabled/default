@@ -38,6 +38,10 @@ server default {
     }
 
     post-auth {
+        update {
+            &reply: += &session-state:
+        }
+
         if (EAP-Type == TLS || EAP-Type == PEAP || EAP-Type == TTLS) {
             redundant {
                 rest
@@ -50,11 +54,6 @@ server default {
             rest
             fail
           }
-        }
-
-        update {
-            &reply:TLS-Session-Version := &session-state:TLS-Session-Version
-            &reply:TLS-Session-Cipher-Suite := &session-state:TLS-Session-Cipher-Suite
         }
     }
 
