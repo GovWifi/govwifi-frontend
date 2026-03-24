@@ -36,7 +36,7 @@ rest {
             \"cert_serial\": \"%{TLS-Client-Cert-Serial}\", \
             \"cert_subject\": \"%{TLS-Client-Cert-Subject}\", \
             \"cert_issuer\": \"%{TLS-Client-Cert-Issuer}\", \
-            \"tls_version\": \"%{%{reply:TLS-Session-Version}:-unknown}\" \
+            \"tls_version\": \"%{%{reply:TLS-Session-Version}:-unknown}\", \
             \"tls_cipher_suite\": \"%{%{reply:TLS-Session-Cipher-Suite}:-unknown}\", \
             \"eap_type\": \"%{%{request:EAP-Type}:-unknown}\" \
         }"
