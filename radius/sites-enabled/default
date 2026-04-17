@@ -1,20 +1,12 @@
 server default {
   listen {
     type = auth
-    
-    
     ipaddr = *
-    
     port = 0
-    
-    
-    
+
     limit {
       max_connections = 64
-      
-      
       lifetime = 0
-      
       idle_timeout = 30
     }
   }
@@ -23,9 +15,7 @@ server default {
     ipaddr = *
     port = 0
     type = acct
-    
     limit {
-      
     }
   }
   
