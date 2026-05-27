@@ -1,3 +1,4 @@
+
 server default {
   listen {
     type = auth
@@ -30,13 +31,16 @@ server default {
   }
   
   authorize {
-    eap {
+    eap
+    govlogger
+    if (ok) {
       ok = return
     }
   }
   
   authenticate {
     eap
+    govlogger
   }
   
   preacct {
@@ -45,11 +49,9 @@ server default {
   accounting {
   }
   
-  session {
-  }
-  
   post-auth {
     if (EAP-Type == TLS) {
+      govlogger
       redundant {
         rest
         ok
@@ -57,6 +59,7 @@ server default {
     }
     
     Post-Auth-Type REJECT {
+      govlogger
       redundant {
         rest
         fail
