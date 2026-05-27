@@ -7,5 +7,7 @@ fi
 c_rehash /etc/raddb/certs/trusted_certificates
 
 cd /healthcheck && bundle exec puma -p 3000 &
-/usr/local/sbin/radiusd ${RADIUSD_PARAMS} &
-freeradius_exporter -web.listen-address 0.0.0.0:9812
+freeradius_exporter -web.listen-address 0.0.0.0:9812 &
+
+# Run freeradius with any additonal arguments in foreground
+/usr/local/sbin/radiusd ${RADIUSD_PARAMS}
