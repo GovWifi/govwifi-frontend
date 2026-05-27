@@ -1,0 +1,103 @@
+
+govlogger {
+
+	#
+	#  The only options for the JSON module are to control the output
+	#  format of the `json_encode` xlat.
+	#
+	encode {
+
+		#
+		#  output_mode:: set the format of JSON documenta
+		#  that should be created. This may be one of:
+		#
+		#  - object
+		#  - object_simple
+		#  - array
+		#  - array_of_names
+		#  - array_of_values
+		#
+		#  Examples of each format are given below.
+		#
+		output_mode = object_simple
+
+		#
+		#  ### Formatting options for attribute names
+		#
+		attribute {
+			#
+			#  prefix:: Add a colon-delimited prefix to all
+			#  attribute names in the output document. For example,
+			#  with a prefix of "foo", `User-Name` will be output as
+			#  `foo:User-Name`.
+			#
+#			prefix =
+		}
+
+		#
+		#  ### Formatting options for attribute values
+		#
+		value {
+
+			#
+			#  single_value_as_array:: always put values in an array
+			#
+			#  Output formats will by default put single values as a
+			#  JSON object (string, integer, etc). More than one
+			#  value will, depending on the output format, be added
+			#  as an array.
+			#
+			#  When this option is enabled, values will always be
+			#  added as an array.
+			#
+#			single_value_as_array = no
+
+			#
+			#  enum_as_integer:: output the integer value of
+			#  enumerated attributes
+			#
+			#  Where an attribute has enum values, the textual
+			#  representation of the value will normally be output.
+			#  Enable this option to force the numeric value
+			#  instead.
+			#
+#			enum_as_integer = no
+
+			#
+			#  dates_as_integer:: output dates as seconds since the
+			#  epoch
+			#
+			#  Where an attribute is a date, the textual
+			#  representation of the date will normally be output.
+			#  Enable this option to force the date to be rendered
+			#  as seconds since the epoch instead.
+			#
+#			dates_as_integer = no
+
+			#
+			#  always_string:: force all values to be strings
+			#
+			#  Integer values are normally written to the JSON
+			#  document as numbers (i.e. without quotes). Enable
+			#  this option to force all values to be as quoted
+			#  strings.
+			#
+#			always_string = no
+		}
+
+	}
+
+    log_file = "banana.log"
+
+    post-auth {
+        log_line = "%T post-auth: { \"State\": \"%{State}\", \"Request\": %{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !TLS-Cert-Valid-Since !TLS-Cert-Valid-Since !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response}, \"Session\": %{govlogger_json:session-state:[*] !TLS-Session-Version !Framed-MTU} }\n"
+    }
+
+    authorize {
+        log_line = "%T authorize: { \"State\": \"%{State}\", \"Request\": %{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !TLS-Cert-Valid-Since !TLS-Cert-Valid-Since !Service-Type  !MS-CHAP-Challenge !MS-CHAP2-Response}, \"Session\": %{govlogger_json:session-state:[*] !TLS-Session-Version !Framed-MTU} }\n"
+    }
+
+    authenticate {
+        log_line = "%T authenticate: { \"State\": \"%{State}\", \"Request\": %{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !TLS-Cert-Valid-Since !TLS-Cert-Valid-Since !MS-CHAP-Challenge !MS-CHAP2-Response}, \"Session\": %{govlogger_json:session-state:[*] !TLS-Session-Version !Framed-MTU} }\n"
+    }
+}
