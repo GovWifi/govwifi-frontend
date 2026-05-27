@@ -20,8 +20,11 @@ test: clean build certs
 lint: build
 	docker run $(DOCKER_FLAGS) --rm -v=$(CURDIR)/radius:/etc/raddb -v=$(CURDIR)/radius/certs:/etc/raddb/certs -p 1812-1813:1812-1813/udp -p 3000:3000 -p 9812:9812 govwifi-frontend /bin/sh -c "cd /healthcheck && bundle exec rubocop -d"
 
-build:
+build:  rlm_govlogger_module
 	docker build --progress=plain $(DOCKER_FLAGS) -t govwifi-frontend .
+
+rlm_govlogger_module:
+	git clone https://github.com/GovWifi/govwifi-radius-custom-module.git rlm_govlogger_module
 
 serve: build certs
 	# Declare the /etc/radius/certs mount explicity, despite being a subdir of /etc/radius because it is declared
