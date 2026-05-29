@@ -90,7 +90,7 @@ COPY radius /etc/raddb
 COPY --from=freeradius_exporter /usr/sbin/freeradius_exporter /usr/sbin/freeradius_exporter
 
 COPY config_watch.py /usr/bin
-COPY scripts/run*.sh scripts/db_utils.sh scripts/vars.sh /usr/bin/
+COPY scripts/run*.sh scripts/db_utils.sh scripts/vars.sh scripts/process_gov_logs /usr/bin/
 
 COPY api-stubs /api-stubs
 WORKDIR /api-stubs

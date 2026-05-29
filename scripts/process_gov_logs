@@ -1,0 +1,371 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use Digest::MD5 qw(md5_hex);
+use FindBin();
+use Getopt::Long ();
+use JSON ();
+use Math::BigInt ();
+use Proc::PID::File;
+use Try::Tiny;
+
+# Number of seconds before a log event is spat out if no post-auth received
+my $EXPIRES         = 15;
+
+# Fields shared between requests
+my @COMMON_FIELDS   = qw(Connect-Info Framed-MTU Calling-Station-Id User-Name NAS-Port-Type NAS-IP-Address);
+
+# Fields used to create a UUID for the request
+my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
+
+# Fields used to deduplicate packets between requests
+my @FIELDS_TO_DEDUP = qw(Stage EAP-Type TLS-Session-Cipher-Suite);
+
+my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $delay);
+Getopt::Long::GetOptions(
+    help        => \$help,
+    pretty      => \$pretty,
+    canonical   => \$canonical,
+    'state=s'   => \$statefile,
+    flush       => \$flush,
+    'logfile=s' => \$logfile,
+    'delay=i'   => \$delay,
+)
+    or die("Invalid command line options:\n" . usage());
+
+# Display help and exit if requested
+if ($help) {
+    print usage();
+    exit;
+}
+
+# Ensure we are not already running
+if (Proc::PID::File->running(dir => '/var/run/lock', name => 'process_gov_logs')) {
+    die("Already running\n");
+}
+
+# Create JSON output formatter
+$pretty ||= 0;
+$canonical ||= 0;
+my $json = JSON->new;
+$json->pretty($pretty);
+$json->canonical($canonical);
+
+# We keep loglines by Uuid and in a linked list (doubly)
+# We should probably have an object here as it's messy
+my $lines_by_uuid = {};
+my $items_by_date_start;
+my $items_by_date_end;
+
+# Handle previous state, and saving state at the end
+my $state_handle;
+if ($statefile) {
+    $state_handle = IO::File->new($statefile, 'r');
+
+    if ($state_handle) {
+        restore_linked_items($state_handle);
+    }
+
+    if (!$flush) {
+        $state_handle = IO::File->new($statefile, 'w')
+            or die("Cannot open $statefile for write: $!\n");
+        print STDERR "Opened $statefile write for remaining event on exit\n";
+    }
+    else {
+        undef $state_handle;
+        unlink $statefile;
+    }
+}
+
+
+# By default read from STDIN, but if file specified, see if rotated file,
+# if rotated file process that, and exit, else rotate...
+my $ih = *STDIN;
+if ($logfile) {
+    my $rotated_file = "$logfile.rotated";
+
+    # Is there a rotated logfile???
+    $ih = IO::File->new($rotated_file, 'r');
+    if ($ih) {
+        print STDERR "Previous rotated file $rotated_file failed to be processed.... trying again\n";
+    }
+    else {
+        # No existing rotated logfile - rotate, wait then process...
+
+        die("Cannot rotate logfile as no delay specified\n" . usage()) if !$delay;
+        if (!rename($logfile, $rotated_file)) {
+            die("Failed to rename $logfile to $rotated_file: $!\n");
+        }
+        
+        # Now sleep until nobody using....
+        print STDERR "Sleeping for $delay seconds before processing $rotated_file\n";
+        sleep $delay;
+        $ih = IO::File->new($rotated_file, 'r');
+        if (!$ih) {
+            die("Failed to open rotated logfile $rotated_file for read: $!\n");
+        }
+    }
+}
+
+# Now read items from input stream....
+while (my $line = $ih->getline) {
+
+    my $data = parse_line($line);
+    next if !$data;
+
+    # We are not interested in proxied data - as EAP-PEAP
+    next if $data->{'FreeRADIUS-Proxied-To'};
+
+    my $Uuid  = $data->{Uuid};
+
+    my $entry = delete $lines_by_uuid->{$Uuid};
+    
+    if ($entry) {
+        remove_item_from_linked_list($entry);
+        $entry->{Expires} = $data->{Expires};
+        push @{ $entry->{lines} }, $data;
+    }
+    else {
+        $entry = {
+            Expires => $data->{Expires},
+            Uuid    => $Uuid,
+            lines   => [],
+        };
+
+        # If an identity packet - lets mark this as start and log nothing
+        if (($data->{'EAP-Type'} eq 'Identity') && ($data->{Stage} eq 'authorize')) {
+            $entry->{StartDate} = $data->{Date};
+        }
+        else {
+            push @ {$entry->{lines} }, $data;
+        }
+    }
+
+    if ($data->{Stage} eq 'post-auth') {
+        send_to_log($entry);
+        next;
+    }
+
+    $lines_by_uuid->{$Uuid} = $entry;
+    add_item_to_list_end($entry);
+
+    my $item = $items_by_date_start;
+    while ($item && ($item->{Expires} < time)) {
+        remove_item_from_linked_list($item);
+        delete $lines_by_uuid->{$item->{Uuid}};
+
+        send_to_log($item);
+        $item = $item->next;
+    }
+}
+
+if ($state_handle) {
+    save_linked_items($state_handle);
+    exit;
+}
+
+while ($items_by_date_start) {
+    send_to_log($items_by_date_start);
+    $items_by_date_start = $items_by_date_start->{next};
+}
+
+sub send_to_log {
+    my ($item) = @_;
+
+    # Get shared data
+    my $lines = $item->{lines};
+
+    my $last_line = $lines->[$#$lines];
+    my $shared = { StartDate => $item->{StartDate }};
+    foreach my $field (@COMMON_FIELDS) {
+        $shared->{$field} = $last_line->{$field};
+    }
+
+    my $previous_line;
+    LINE: foreach my $line (@$lines) {
+        delete @$line{(@COMMON_FIELDS, 'Expires', 'Uuid', 'State')};
+        # If TLS Session info same as previous - dont log...
+
+        # Some fields may repeat - replace with "-" if same as previous
+        my $dedup_count = 0;
+
+        if ($previous_line) {
+            foreach my $dedup_field (@FIELDS_TO_DEDUP) {
+
+                my $last_value = $previous_line->{$dedup_field};
+                my $current_value = $line->{$dedup_field};
+                $current_value = $json->encode($current_value) if ref($current_value);
+
+                if ($last_value && $current_value) {
+                    if ($last_value eq $current_value) {
+                        $dedup_count++;
+                    }
+                }
+            }
+
+            my $key_count = scalar keys %$line;
+            my $previous_key_count = scalar keys %$previous_line;
+            if (($dedup_count == $key_count - 1) && ($key_count == $previous_key_count)) {
+                my $date = $previous_line->{Date};
+                if (ref($date)) {
+                    push @$date, $line->{Date};
+                }
+                else {
+                    $previous_line->{Date} = [ $previous_line->{Date}, $line->{Date} ];
+                }
+                next LINE;
+            }
+        }
+        $previous_line = $line;
+        push @{ $shared->{lines} }, $line;
+    }
+    print  $json->encode($shared),"\n";
+}
+
+sub add_item_to_list_end {
+    my ($item) = @_;
+
+    if ($items_by_date_end) {
+        $items_by_date_end->{next} = $item;
+        $item->{prev} = $items_by_date_end;
+        $items_by_date_end = $item;
+    }
+    else {
+        $items_by_date_end = $items_by_date_start = $item;
+        delete $item->{prev};
+        delete $item->{next};
+    }
+}
+
+sub remove_item_from_linked_list {
+    my ($item) = @_;
+
+    my $prev = $item->{prev};
+    my $next = $item->{next};
+    if ($prev) {
+        $prev->{next} = $next;
+    }
+    else {
+        $items_by_date_start = $next;
+    }
+
+    if ($next) {
+        $next->{prev} = $prev;
+    }
+    else {
+        $items_by_date_end = $prev;
+    }
+    delete $item->{prev};
+    delete $item->{next};
+    return $item;
+}
+
+sub parse_line {
+    my ($line) = @_;
+    $line =~ s/, "Session":  \}/\}/;
+
+    # The open close statements are not worth trying to parse
+    return if $line =~ m/^GovLogger closing/;
+
+    if ($line =~ m/^(\d+\.\d+)\s+(.*?): (.+)/) {
+        my ($date, $stage, $j) = ($1,$2, $3);
+
+        my $data;
+        try {
+            $data = $json->decode($j);
+        }
+        catch {
+            print STDERR "Got JSON error decoding:\n$j$_\n\n";
+        };
+
+        return if !$data;
+
+        my $flattened = {%{ $data->{Request} }, %{ $data->{Session} }, Expires => time + $EXPIRES, Stage => $stage };
+
+        # Turn the date into 64 bit integer
+        if ($date =~ /^(\d+)\.(\d+)$/) {
+            $flattened->{Date} = (Math::BigInt->new($1) * 1000000 + Math::BigInt->new($2))->bstr;
+        }
+        else {
+            $flattened->{Date} = $date;
+        }
+        $flattened->{Uuid} = md5_hex( join('|', @$flattened{@UUID_FIELDS}) );
+        return $flattened;
+    }
+    else {
+        print STDERR "ERROR line syntax wrong: $line";
+        return undef;
+    }
+}
+
+sub restore_linked_items {
+    my ($file) = @_;
+
+    my $text = '';
+    while (my $line = $file->getline) {
+        $text .= $line;
+    }
+
+    my $items;
+    try {
+        $items = $json->decode($text);
+    }
+    catch {
+        print STDERR "Failed to decode JSON frome file: $_\n";
+        exit;
+    };
+
+    foreach my $item (@$items) {
+        $item->{Expires} = time + $EXPIRES;
+        add_item_to_list_end($item);
+        $lines_by_uuid->{ $item->{Uuid} } = $item;
+    }
+}
+
+sub save_linked_items {
+    my ($file) = @_;
+
+    my @to_write;
+    my $item = $items_by_date_start;
+
+    while ($item) {
+        my $next = delete $item->{next};    
+        delete $item->{prev};
+
+        push @to_write, $item;
+        $item = $next;
+    }
+
+    $file->print($json->encode(\@to_write));
+}
+
+        
+
+sub usage {
+    return $FindBin::Script . ' [--help|-h] [--pretty|-p] [--canonical|-c] [--state|-s statefile] [--delay|-d seconds] [--logfile|-l logfile]
+Read from log data from freeradius using the govlogger and output structured JSON log events.
+Data is read until end of stream or file. The program uses a pidfile process_gov_logs.pid and
+exits with error of running more than once.
+
+If a logfile is specified it is rotated to a file logfile.rotated and the program sleeps for \'delay\'
+seconds before processing. This allows the govlogger to close the file cleanly.
+
+As some events may not be complete you can specify a state file to store remaining log events. This is
+read at program start, and rewritten on exit allowing continual processing of log event without data loss.
+
+   --help|-h      Produces this help
+   --pretty|-p    Produces pretty JSON
+   --canonical|-c Order fields alphanumerically
+   --state|-s     Filename to restore and store state between invocations
+   --flush|-f     Push all data out at end, even if not complete log event, this is used mainly
+                  during testing to ensure parsing split data file produces same output as single
+                  datafile.
+   --delay|-d     Specify the number of seconds to wait when rotating an input file before processing
+                  thus allowing all writers to have closed the file descriptor
+   --logfile|-l   By default the program reads from stdin, if specified the file is renamed \'.rotated\'
+                  and a then \'delay\' seconds are allowed to elapse before the file is opened for processing.
+';
+}
