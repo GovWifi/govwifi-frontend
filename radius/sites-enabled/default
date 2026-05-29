@@ -32,7 +32,9 @@ server default {
   
   authorize {
     eap
-    govlogger
+    if (EAP-Type != "PEAP" && EAP-Type != "MSCHAPv2") {
+	    govlogger
+    }
     if (ok) {
       ok = return
     }
