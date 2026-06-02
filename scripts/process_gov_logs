@@ -10,7 +10,6 @@ use FindBin();
 use Getopt::Long ();
 use JSON ();
 use Math::BigInt ();
-use Try::Tiny;
 
 # Number of seconds before a log event is spat out if no post-auth received
 my $EXPIRES         = 15;
@@ -24,6 +23,7 @@ my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
 # Fields used to deduplicate packets between requests
 my @FIELDS_TO_DEDUP = qw(Stage EAP-Type TLS-Session-Cipher-Suite);
 
+# Parse the many command line options...
 my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $wait, $last_date_only, $drop_eap_peap);
 Getopt::Long::GetOptions(
     canonical             => \$canonical,
@@ -47,8 +47,6 @@ if ($help) {
 # Ensure we are not already running
 my $pid_filename = '/var/run/lock/process_gov_logs.pid';
 my $pid_filehandle = create_pid_file($pid_filename);
-sleep 10;
-exit;
 #
 # Create JSON output formatter
 #
@@ -95,8 +93,9 @@ if ($statefile) {
 # if rotated file process that, and exit, else rotate...
 #
 my $ih = *STDIN;
+my $rotated_file;
 if ($logfile) {
-    my $rotated_file = "$logfile.rotated";
+    $rotated_file = "$logfile.rotated";
 
     # Is there a rotated logfile???
     $ih = IO::File->new($rotated_file, 'r');
@@ -204,6 +203,9 @@ else {
         $items_by_date_start = $items_by_date_start->{next};
     }
 }
+
+# Have we got a rotated file - we've processed it - so delete
+unlink $rotated_file if $rotated_file;
 
 # Finally we should delete the pidfile (for cleanliness)
 # Note we delete first, which does allow somebody to start running here, but as we are all done
@@ -329,13 +331,15 @@ sub parse_line {
         my ($date, $stage, $j) = ($1,$2, $3);
 
         my $data;
-        try {
-            $data = $json->decode($j);
+        {
+            local $@;
+            eval {
+                $data = $json->decode($j);
+            };
+            if ($@) {
+                print STDERR "Got JSON error decoding:\n$j$_\n\n";
+            }
         }
-        catch {
-            print STDERR "Got JSON error decoding:\n$j$_\n\n";
-        };
-
         return if !$data;
 
         my $flattened = {%{ $data->{Request} }, %{ $data->{Session} }, Expires => time + $EXPIRES, Stage => $stage };
@@ -365,13 +369,14 @@ sub restore_linked_items {
     }
 
     my $items;
-    try {
-        $items = $json->decode($text);
+    {
+        local $@;
+        eval {
+            $items = $json->decode($text);
+        };
+        die("Failed to decode JSON from state file: $@\n")
+            if $@;
     }
-    catch {
-        print STDERR "Failed to decode JSON frome file: $_\n";
-        exit;
-    };
 
     foreach my $item (@$items) {
         $item->{Expires} = time + $EXPIRES;
