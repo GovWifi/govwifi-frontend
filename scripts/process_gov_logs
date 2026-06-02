@@ -5,11 +5,11 @@ use warnings;
 
 use Data::Dumper;
 use Digest::MD5 qw(md5_hex);
+use Fcntl qw(:DEFAULT :flock);
 use FindBin();
 use Getopt::Long ();
 use JSON ();
 use Math::BigInt ();
-use Proc::PID::File;
 use Try::Tiny;
 
 # Number of seconds before a log event is spat out if no post-auth received
@@ -24,15 +24,17 @@ my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
 # Fields used to deduplicate packets between requests
 my @FIELDS_TO_DEDUP = qw(Stage EAP-Type TLS-Session-Cipher-Suite);
 
-my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $delay);
+my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $wait, $last_date_only, $drop_eap_peap);
 Getopt::Long::GetOptions(
-    help        => \$help,
-    pretty      => \$pretty,
-    canonical   => \$canonical,
-    'state=s'   => \$statefile,
-    flush       => \$flush,
-    'logfile=s' => \$logfile,
-    'delay=i'   => \$delay,
+    canonical             => \$canonical,
+    flush                 => \$flush,
+    help                  => \$help,
+    'logfile=s'           => \$logfile,
+    pretty                => \$pretty,
+    reduce_last_date_only => \$last_date_only,
+    reduce_drop_eap_peap  => \$drop_eap_peap,
+    'state=s'             => \$statefile,
+    'wait=i'              => \$wait,
 )
     or die("Invalid command line options:\n" . usage());
 
@@ -43,11 +45,13 @@ if ($help) {
 }
 
 # Ensure we are not already running
-if (Proc::PID::File->running(dir => '/var/run/lock', name => 'process_gov_logs')) {
-    die("Already running\n");
-}
-
+my $pid_filename = '/var/run/lock/process_gov_logs.pid';
+my $pid_filehandle = create_pid_file($pid_filename);
+sleep 10;
+exit;
+#
 # Create JSON output formatter
+#
 $pretty ||= 0;
 $canonical ||= 0;
 my $json = JSON->new;
@@ -60,13 +64,19 @@ my $lines_by_uuid = {};
 my $items_by_date_start;
 my $items_by_date_end;
 
+#
 # Handle previous state, and saving state at the end
+#
 my $state_handle;
 if ($statefile) {
+    #
+    # First try to restore previous state
+    #
     $state_handle = IO::File->new($statefile, 'r');
 
     if ($state_handle) {
         restore_linked_items($state_handle);
+        $state_handle->close;
     }
 
     if (!$flush) {
@@ -80,9 +90,10 @@ if ($statefile) {
     }
 }
 
-
+#
 # By default read from STDIN, but if file specified, see if rotated file,
 # if rotated file process that, and exit, else rotate...
+#
 my $ih = *STDIN;
 if ($logfile) {
     my $rotated_file = "$logfile.rotated";
@@ -95,14 +106,15 @@ if ($logfile) {
     else {
         # No existing rotated logfile - rotate, wait then process...
 
-        die("Cannot rotate logfile as no delay specified\n" . usage()) if !$delay;
+        die("Cannot rotate logfile as no wait specified\n" . usage()) if !$wait;
         if (!rename($logfile, $rotated_file)) {
             die("Failed to rename $logfile to $rotated_file: $!\n");
         }
+        print STDERR "Renamed $logfile $rotated_file\n";
         
         # Now sleep until nobody using....
-        print STDERR "Sleeping for $delay seconds before processing $rotated_file\n";
-        sleep $delay;
+        print STDERR "Sleeping for $wait seconds before processing $rotated_file\n";
+        sleep $wait;
         $ih = IO::File->new($rotated_file, 'r');
         if (!$ih) {
             die("Failed to open rotated logfile $rotated_file for read: $!\n");
@@ -110,7 +122,9 @@ if ($logfile) {
     }
 }
 
+#
 # Now read items from input stream....
+#
 while (my $line = $ih->getline) {
 
     my $data = parse_line($line);
@@ -119,15 +133,22 @@ while (my $line = $ih->getline) {
     # We are not interested in proxied data - as EAP-PEAP
     next if $data->{'FreeRADIUS-Proxied-To'};
 
+    # We use the Uuid to identify packets from same client, this might not be right,
+    # but best we can do
     my $Uuid  = $data->{Uuid};
 
     my $entry = delete $lines_by_uuid->{$Uuid};
-    
+
+    # If we have a previous line by this Uuid add data to it
     if ($entry) {
         remove_item_from_linked_list($entry);
         $entry->{Expires} = $data->{Expires};
         push @{ $entry->{lines} }, $data;
     }
+
+    #
+    # Otherwise create a new log entry
+    #
     else {
         $entry = {
             Expires => $data->{Expires},
@@ -135,7 +156,10 @@ while (my $line = $ih->getline) {
             lines   => [],
         };
 
+        #
         # If an identity packet - lets mark this as start and log nothing
+        # We just set the StartDate for the events
+        #
         if (($data->{'EAP-Type'} eq 'Identity') && ($data->{Stage} eq 'authorize')) {
             $entry->{StartDate} = $data->{Date};
         }
@@ -144,14 +168,18 @@ while (my $line = $ih->getline) {
         }
     }
 
+    #
+    # If its a post-auth packet lets output and move on....
     if ($data->{Stage} eq 'post-auth') {
         send_to_log($entry);
         next;
     }
 
+    # OK - Add back into the hash and linked list
     $lines_by_uuid->{$Uuid} = $entry;
     add_item_to_list_end($entry);
 
+    # Delete items in linked list that have expired
     my $item = $items_by_date_start;
     while ($item && ($item->{Expires} < time)) {
         remove_item_from_linked_list($item);
@@ -162,15 +190,27 @@ while (my $line = $ih->getline) {
     }
 }
 
+#
+# If we have a state file to store items remaining
+# output the data to this file and exit
+#
 if ($state_handle) {
     save_linked_items($state_handle);
-    exit;
+}
+else {
+    # Otherwise output the remaining items
+    while ($items_by_date_start) {
+        send_to_log($items_by_date_start);
+        $items_by_date_start = $items_by_date_start->{next};
+    }
 }
 
-while ($items_by_date_start) {
-    send_to_log($items_by_date_start);
-    $items_by_date_start = $items_by_date_start->{next};
-}
+# Finally we should delete the pidfile (for cleanliness)
+# Note we delete first, which does allow somebody to start running here, but as we are all done
+# it no longer matters....
+unlink $pid_filename;
+exit;
+
 
 sub send_to_log {
     my ($item) = @_;
@@ -179,6 +219,10 @@ sub send_to_log {
     my $lines = $item->{lines};
 
     my $last_line = $lines->[$#$lines];
+
+    # If option reduce_drop_eap_peap we skip PEAP messages
+    return if $drop_eap_peap && $last_line->{'EAP-Type'} eq 'PEAP';
+
     my $shared = { StartDate => $item->{StartDate }};
     foreach my $field (@COMMON_FIELDS) {
         $shared->{$field} = $last_line->{$field};
@@ -209,12 +253,21 @@ sub send_to_log {
             my $key_count = scalar keys %$line;
             my $previous_key_count = scalar keys %$previous_line;
             if (($dedup_count == $key_count - 1) && ($key_count == $previous_key_count)) {
-                my $date = $previous_line->{Date};
-                if (ref($date)) {
-                    push @$date, $line->{Date};
+                #
+                # Squash identical lines to array of dates, or just the last date
+                # if reduce_last_date_only option set
+                #
+                if ($last_date_only) {
+                    $previous_line->{Date} = $line->{Date};
                 }
                 else {
-                    $previous_line->{Date} = [ $previous_line->{Date}, $line->{Date} ];
+                    my $date = $previous_line->{Date};
+                    if (ref($date)) {
+                        push @$date, $line->{Date};
+                    }
+                    else {
+                        $previous_line->{Date} = [ $previous_line->{Date}, $line->{Date} ];
+                    }
                 }
                 next LINE;
             }
@@ -265,9 +318,11 @@ sub remove_item_from_linked_list {
 
 sub parse_line {
     my ($line) = @_;
-    $line =~ s/, "Session":  \}/\}/;
 
+    #
     # The open close statements are not worth trying to parse
+    # they are generated when govlogger closes the file
+    #
     return if $line =~ m/^GovLogger closing/;
 
     if ($line =~ m/^(\d+\.\d+)\s+(.*?): (.+)/) {
@@ -345,27 +400,59 @@ sub save_linked_items {
         
 
 sub usage {
-    return $FindBin::Script . ' [--help|-h] [--pretty|-p] [--canonical|-c] [--state|-s statefile] [--delay|-d seconds] [--logfile|-l logfile]
+    return $FindBin::Script . ' [--help|-h] [--pretty|-p] [--canonical|-c] [--state statefile]
+    [--wait|-w seconds] [--logfile|-l logfile]
 Read from log data from freeradius using the govlogger and output structured JSON log events.
 Data is read until end of stream or file. The program uses a pidfile process_gov_logs.pid and
 exits with error of running more than once.
 
-If a logfile is specified it is rotated to a file logfile.rotated and the program sleeps for \'delay\'
+If a logfile is specified it is rotated to a file logfile.rotated and the program waits for \'wait\'
 seconds before processing. This allows the govlogger to close the file cleanly.
 
 As some events may not be complete you can specify a state file to store remaining log events. This is
 read at program start, and rewritten on exit allowing continual processing of log event without data loss.
 
-   --help|-h      Produces this help
-   --pretty|-p    Produces pretty JSON
    --canonical|-c Order fields alphanumerically
-   --state|-s     Filename to restore and store state between invocations
    --flush|-f     Push all data out at end, even if not complete log event, this is used mainly
                   during testing to ensure parsing split data file produces same output as single
                   datafile.
-   --delay|-d     Specify the number of seconds to wait when rotating an input file before processing
-                  thus allowing all writers to have closed the file descriptor
+   --help|-h      Produces this help
    --logfile|-l   By default the program reads from stdin, if specified the file is renamed \'.rotated\'
                   and a then \'delay\' seconds are allowed to elapse before the file is opened for processing.
+   --pretty|-p    Produces pretty JSON
+   --reduce_last_date_only Only show the last date for entries with identical data, i.e. TLS negotiation
+                           which would have 6 events logged.
+   --reduce_drop_eap_peap  Drop EAP-PEAP log events.
+   --state|-s     Filename to restore and store state between invocations
+   --wait|-w      Specify the number of seconds to wait when rotating an input file before processing
+                  thus allowing all writers to have closed the file descriptor
 ';
 }
+
+# Create a pid file, and read previous, use LOCK_EX so only one
+# process can own the file. DO NOT close the filehandle until
+# all our work is done - else it's not an exlusive semaphore
+sub create_pid_file {
+    my ($pidfile) = @_;
+
+    # Open the pidfile read write
+    sysopen my $pid_filehandle, $pidfile, O_RDWR|O_CREAT
+                || die qq/Cannot open pid file "$pidfile": $!\n/;
+
+    my $maybe = <$pid_filehandle>;
+    my ($pid) = $maybe =~ /^(\d+)/ if (defined $maybe);
+    $pid ||= '?';
+
+    # Try to get an exclusive lock on the pidfile
+    flock($pid_filehandle, LOCK_EX | LOCK_NB)
+        || die qq/pid "$pidfile" already locked (pid=$pid)\n/;
+
+    print STDERR "Pid file from previous run still exists: (pid=$pid)\n"
+        if $pid ne '?';
+
+    # Seek back to start of file
+    seek($pid_filehandle, 0, 0);
+    print $pid_filehandle "$$\n";
+    return $pid_filehandle;
+}
+ 
