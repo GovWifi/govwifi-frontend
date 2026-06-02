@@ -77,7 +77,7 @@ FROM ruby:3.4.7-alpine3.22
 RUN apk --update --no-cache add wpa_supplicant openssl make gcc libc-dev curl talloc-dev jq g++ zlib-dev \
     openssl-dev ca-certificates linux-headers python3 py3-pip py3-wheel net-tools tmux sqlite-libs \
     sqlite sqlite-dev libxml2 curl-dev json-c-dev libmemcached-dev \
-    mariadb-connector-c-dev py-watchdog
+    mariadb-connector-c-dev py-watchdog perl perl-json perl-json-xs
 
 COPY --from=freeradius_binary /root/freeradius.tgz /root/freeradius.tgz
 RUN cd / && tar xvzf /root/freeradius.tgz
