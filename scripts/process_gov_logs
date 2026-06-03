@@ -6,7 +6,7 @@ use warnings;
 use Data::Dumper;
 use Digest::MD5 qw(md5_hex);
 use Fcntl qw(:DEFAULT :flock);
-use FindBin();
+use FindBin ();
 use Getopt::Long ();
 use JSON ();
 use Math::BigInt ();
@@ -35,7 +35,7 @@ my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
 my @FIELDS_TO_DEDUP = qw(Stage EAP-Type TLS-Session-Cipher-Suite);
 
 # Parse the many command line options...
-my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $wait, $last_date_only, $drop_eap_peap, $expiry_seconds);
+my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $wait, $last_date_only, $drop_eap_peap, $expiry_seconds, $unittests);
 Getopt::Long::GetOptions(
     canonical             => \$canonical,
     'expires=i'           => \$expiry_seconds,
@@ -46,6 +46,7 @@ Getopt::Long::GetOptions(
     reduce_last_date_only => \$last_date_only,
     reduce_drop_eap_peap  => \$drop_eap_peap,
     'state=s'             => \$statefile,
+    unittests             => \$unittests,
     'wait=i'              => \$wait,
 )
     or die("Invalid command line options:\n" . usage());
@@ -56,11 +57,18 @@ if ($help) {
     exit;
 }
 
-# Ensure we are not already running
+# Nasty having unit tests in program - but it was quick
+if ($unittests) {
+    unittests();
+    exit;
+}
+
+# Ensure we are not already running by getting an exlusive filelock on a pid file
 my $pid_filename = '/var/run/lock/process_gov_logs.pid';
 my $pid_filehandle = create_pid_file($pid_filename);
+
 #
-# Create JSON output formatter
+# Create JSON output formatter and parser
 #
 $pretty ||= 0;
 $canonical ||= 0;
@@ -89,14 +97,15 @@ if ($statefile) {
         $state_handle->close;
     }
 
-    if (!$flush) {
+    # If we are flushing all output - we will not leave any state remaining...
+    if ($flush) {
+        undef $state_handle;
+        unlink $statefile;
+    }
+    else {
         $state_handle = IO::File->new($statefile, 'w')
             or die("Cannot open $statefile for write: $!\n");
         print STDERR "Opened $statefile write for remaining event on exit\n";
-    }
-    else {
-        undef $state_handle;
-        unlink $statefile;
     }
 }
 
@@ -107,6 +116,9 @@ if ($statefile) {
 my $ih = *STDIN;
 my $rotated_file;
 if ($logfile) {
+    # We cannot rotate if the wait time has not been specified
+    die("Cannot rotate logfile as no wait specified\n" . usage()) if !$wait;
+
     $rotated_file = "$logfile.rotated";
 
     # Is there a rotated logfile???
@@ -116,16 +128,18 @@ if ($logfile) {
     }
     else {
         # No existing rotated logfile - rotate, wait then process...
-
-        die("Cannot rotate logfile as no wait specified\n" . usage()) if !$wait;
+        # there is no race condition here as we have a lock and nobody
+        # else whould be rotating the logfile
         if (!rename($logfile, $rotated_file)) {
             die("Failed to rename $logfile to $rotated_file: $!\n");
         }
         print STDERR "Renamed $logfile $rotated_file\n";
         
-        # Now sleep until nobody using....
+        # Now sleep until freeradius has finished writing....
         print STDERR "Sleeping for $wait seconds before processing $rotated_file\n";
         sleep $wait;
+
+        # Finally open file read
         $ih = IO::File->new($rotated_file, 'r');
         if (!$ih) {
             die("Failed to open rotated logfile $rotated_file for read: $!\n");
@@ -134,7 +148,7 @@ if ($logfile) {
 }
 
 #
-# Now read items from input stream....
+# Now read all items from input stream....
 #
 while (my $line = $ih->getline) {
 
@@ -205,7 +219,7 @@ while (my $line = $ih->getline) {
 
         # Log and look at next item
         send_to_log($item);
-        $item = $item->next;
+        $item = $item->{next};
     }
 }
 
@@ -303,12 +317,12 @@ sub send_to_log {
 sub add_item_to_list {
     my ($item) = @_;
 
+    delete $item->{prev};
+    delete $item->{next};
     if (!$items_by_utime_end) {
         $items_by_utime_end = $items_by_utime_start = $item;
         return;
     }
-    delete $item->{prev};
-    delete $item->{next};
 
     # It is most likely the expiry time will be greater than the end of the list
     # so we will start looking at the end
@@ -317,13 +331,15 @@ sub add_item_to_list {
 
     # After is the item we want to insert after....
     my $after = $items_by_utime_end;
+    my $is_end = 1;
     while ($after->{Unixtime} > $utime) {
+        $is_end = 0;
         my $previous = $after->{prev};
         
         # If we havnt a previous we want to insert at the start
         if (!$previous) {
-            $after->{previous} = $item;
-            $item->{next} = $after;
+            $items_by_utime_start->{prev} = $item;
+            $item->{next} = $items_by_utime_start;
             $items_by_utime_start = $item;
             return;
         }
@@ -331,12 +347,21 @@ sub add_item_to_list {
         $after = $previous;
     }
 
-    my $next = $after->next;
+    if ($is_end) {
+        $items_by_utime_end->{next} = $item;
+        $item->{prev} = $items_by_utime_end;
+        $items_by_utime_end = $item;
+        return;
+    }
+
+    # At this point their must be a next - as is_end is false
+    my $next = $after->{next};
 
     $after->{next} = $item;
     $item->{prev} = $after;
+    $item->{next} = $next;
 
-    $next->{prev} = $item if $next;
+    $next->{prev} = $item;
 }
         
 
@@ -509,9 +534,127 @@ sub create_pid_file {
     print STDERR "Pid file from previous run still exists: (pid=$pid)\n"
         if $pid ne '?';
 
-    # Seek back to start of file
+    # Seek back to start of file and truncate
     seek($pid_filehandle, 0, 0);
+    truncate($pid_filehandle,0);
+
     print $pid_filehandle "$$\n";
+    $pid_filehandle->flush;
     return $pid_filehandle;
+}
+
+sub unittests {
+    #
+    # Check lockfile
+    #
+    my $pidfile;
+    eval {
+        $pidfile = create_pid_file('/tmp/banana');
+    };
+
+    die("Failed to create pidfile /tmp/banana calling create_pid_file()\n") if !$pidfile;
+    print "Pidfile /tmp/banana created\n";
+
+    my $file = IO::File->new('/tmp/banana','r');
+    die("Failed to open pidfile /tmp/banana: $!\n") if !$file;
+
+    my $pid = $file->getline;
+    chomp($pid);
+    die("Pid file /tmp/banana did not contain a process id\n") if $pid !~ m/^\d+$/;
+    print "Pidfile /tmp/banana contained pid $pid\n";
+
+    die("Pid does not match programs $pid != $$\n") if $pid != $$;
+    print "Pidfile /tmp/banana contained pid $pid, matching current process pid $$\n";
+
+    my $second_lock;
+    eval {
+        $second_lock = create_pid_file('/tmp/banana');
+    };
+
+    die("Lock on /tmp/banana not exclusive, successfull second lock on calling create_pid_file()\n")
+        if $second_lock;
+    print "Failed to get second lock on /tmp/banana calling create_pid_file() - Success\n";
+
+    $pidfile->close;
+    eval {
+        $second_lock = create_pid_file('/tmp/banana');
+    };
+
+    die("Failed to get lock on /tmp/banana after closing lock calling create_pid_file()\n")
+        if !$second_lock;
+    print "Successfully got second lock after closing previous calling create_pid_file()\n";
+    $second_lock->close;
+    unlink('/tmp/banana');
+
+    #
+    # Check linked list
+    #
+    my @items = (
+        { name => 'entry0', Unixtime => 8 },
+        { name => 'entry1', Unixtime => 10 },
+        { name => 'entry2', Unixtime => 12 },
+        { name => 'entry3', Unixtime => 14 },
+        { name => 'entry4', Unixtime => 16 },
+    );
+        
+    add_item_to_list($items[1]);
+    add_item_to_list($items[3]);
+    add_item_to_list($items[2]);
+    add_item_to_list($items[4]);
+    add_item_to_list($items[0]);
+
+    check_items_in_right_order(@items);
+
+    # remove item from middle
+    remove_item_from_linked_list($items[2]);
+    check_items_in_right_order($items[0], $items[1], $items[3], $items[4]);
+
+    add_item_to_list($items[2]);
+    check_items_in_right_order(@items);
+
+    print "Item added back in ok\n";
+    
+    # remove item from start
+    remove_item_from_linked_list($items[0]);
+    check_items_in_right_order($items[1], $items[2], $items[3], $items[4]);
+
+    print "Item remove ok from start\n";
+
+    add_item_to_list($items[0]);
+    check_items_in_right_order(@items);
+
+    # remove item from start
+    remove_item_from_linked_list($items[4]);
+    check_items_in_right_order($items[0], $items[1], $items[2], $items[3]);
+
+    print "Item remove ok from end\n";
+
+    # Remove one before start...
+    add_item_to_list($items[4]);
+    remove_item_from_linked_list($items[1]);
+    check_items_in_right_order($items[0], $items[2], $items[3], $items[4]);
+
+    print "Item remove one before start ok\n";
+
+    # Remove one before end...
+    add_item_to_list($items[1]);
+    remove_item_from_linked_list($items[3]);
+    check_items_in_right_order($items[0], $items[1], $items[2], $items[4]);
+}
+
+sub check_items_in_right_order {
+    my (@items) = @_;    
+    my $start = $items_by_utime_start;
+    my $index = 0;
+    while ($start) {
+        die("Item $index in linked list was not expected  ",$items[$index]{name}," but was $start->{name}\n")
+            if $items[$index]{name} ne $start->{name};
+        print "Item $index in linked list was as expected $start->{name}\n";
+        $index++;
+        $start = $start->{next};
+    }
+
+    die("Not all items found in list that were inserted\n") if $index != @items;
+    print "Successfully found all items in list in right order\n";
 }
  
