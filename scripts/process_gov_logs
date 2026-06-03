@@ -11,11 +11,22 @@ use Getopt::Long ();
 use JSON ();
 use Math::BigInt ();
 
-# Number of seconds before a log event is spat out if no post-auth received
-my $EXPIRES         = 15;
+# Important things to note regarding this script:
+#   1. Gets an exclusive lock on pid file (LOCK_EX) nonblocking - and exits on failure,
+#      this ensures only one script can run at a time, the lock is released on program
+#      completion. (flocks in unix are released when process exits - unlike windows)
+#   2. It checks for rotated file - and if present logs error and reprocesses it
+#   3. If no rotated file, rotates the file, sleeps for period to allow the govlogger
+#      module to close all descriptors
+#   4. Reads in the previous unprocessed log items, and then starts processing the log lines
+#   5. At end of file, writes out unprocessed log items and deletes rotated logfile.
+#
+# The expiry of uncomplete log lines is important. The time to expire is taken from the time
+# of the log line being processed, not the time now - this helps if we have a logging backlog, as now may
+# be far ahead of the current line being processed. This is subtle.
 
 # Fields shared between requests
-my @COMMON_FIELDS   = qw(Connect-Info Framed-MTU Calling-Station-Id User-Name NAS-Port-Type NAS-IP-Address);
+my @COMMON_FIELDS   = qw(Connect-Info Framed-MTU Calling-Station-Id User-Name NAS-Port-Type NAS-IP-Address eap_sessions);
 
 # Fields used to create a UUID for the request
 my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
@@ -24,9 +35,10 @@ my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
 my @FIELDS_TO_DEDUP = qw(Stage EAP-Type TLS-Session-Cipher-Suite);
 
 # Parse the many command line options...
-my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $wait, $last_date_only, $drop_eap_peap);
+my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $wait, $last_date_only, $drop_eap_peap, $expiry_seconds);
 Getopt::Long::GetOptions(
     canonical             => \$canonical,
+    'expires=i'           => \$expiry_seconds,
     flush                 => \$flush,
     help                  => \$help,
     'logfile=s'           => \$logfile,
@@ -59,8 +71,8 @@ $json->canonical($canonical);
 # We keep loglines by Uuid and in a linked list (doubly)
 # We should probably have an object here as it's messy
 my $lines_by_uuid = {};
-my $items_by_date_start;
-my $items_by_date_end;
+my $items_by_utime_start;
+my $items_by_utime_end;
 
 #
 # Handle previous state, and saving state at the end
@@ -141,7 +153,7 @@ while (my $line = $ih->getline) {
     # If we have a previous line by this Uuid add data to it
     if ($entry) {
         remove_item_from_linked_list($entry);
-        $entry->{Expires} = $data->{Expires};
+        $entry->{Unixtime} = $data->{Unixtime};
         push @{ $entry->{lines} }, $data;
     }
 
@@ -150,9 +162,9 @@ while (my $line = $ih->getline) {
     #
     else {
         $entry = {
-            Expires => $data->{Expires},
-            Uuid    => $Uuid,
-            lines   => [],
+            Expires      => $data->{Expires},
+            Uuid         => $Uuid,
+            lines        => [],
         };
 
         #
@@ -176,14 +188,22 @@ while (my $line = $ih->getline) {
 
     # OK - Add back into the hash and linked list
     $lines_by_uuid->{$Uuid} = $entry;
-    add_item_to_list_end($entry);
+    add_item_to_list($entry);
 
-    # Delete items in linked list that have expired
-    my $item = $items_by_date_start;
-    while ($item && ($item->{Expires} < time)) {
+    # As we have a log event we have the Unixtime, we can use this to expire older items in the
+    # linked list
+    my $expiry_date = $entry->{Unixtime} - $expiry_seconds;
+
+    # Delete items in linked list that have expired, these will be at the start
+    my $item = $items_by_utime_start;
+    while ($item && ($item->{Unixtime} < $expiry_date)) {
+        # Remove item from linked list
         remove_item_from_linked_list($item);
+    
+        # Remove from Uuid map
         delete $lines_by_uuid->{$item->{Uuid}};
 
+        # Log and look at next item
         send_to_log($item);
         $item = $item->next;
     }
@@ -198,9 +218,9 @@ if ($state_handle) {
 }
 else {
     # Otherwise output the remaining items
-    while ($items_by_date_start) {
-        send_to_log($items_by_date_start);
-        $items_by_date_start = $items_by_date_start->{next};
+    while ($items_by_utime_start) {
+        send_to_log($items_by_utime_start);
+        $items_by_utime_start = $items_by_utime_start->{next};
     }
 }
 
@@ -280,20 +300,45 @@ sub send_to_log {
     print  $json->encode($shared),"\n";
 }
 
-sub add_item_to_list_end {
+sub add_item_to_list {
     my ($item) = @_;
 
-    if ($items_by_date_end) {
-        $items_by_date_end->{next} = $item;
-        $item->{prev} = $items_by_date_end;
-        $items_by_date_end = $item;
+    if (!$items_by_utime_end) {
+        $items_by_utime_end = $items_by_utime_start = $item;
+        return;
     }
-    else {
-        $items_by_date_end = $items_by_date_start = $item;
-        delete $item->{prev};
-        delete $item->{next};
+    delete $item->{prev};
+    delete $item->{next};
+
+    # It is most likely the expiry time will be greater than the end of the list
+    # so we will start looking at the end
+
+    my $utime = $item->{Unixtime};
+
+    # After is the item we want to insert after....
+    my $after = $items_by_utime_end;
+    while ($after->{Unixtime} > $utime) {
+        my $previous = $after->{prev};
+        
+        # If we havnt a previous we want to insert at the start
+        if (!$previous) {
+            $after->{previous} = $item;
+            $item->{next} = $after;
+            $items_by_utime_start = $item;
+            return;
+        }
+            
+        $after = $previous;
     }
+
+    my $next = $after->next;
+
+    $after->{next} = $item;
+    $item->{prev} = $after;
+
+    $next->{prev} = $item if $next;
 }
+        
 
 sub remove_item_from_linked_list {
     my ($item) = @_;
@@ -304,14 +349,14 @@ sub remove_item_from_linked_list {
         $prev->{next} = $next;
     }
     else {
-        $items_by_date_start = $next;
+        $items_by_utime_start = $next;
     }
 
     if ($next) {
         $next->{prev} = $prev;
     }
     else {
-        $items_by_date_end = $prev;
+        $items_by_utime_end = $prev;
     }
     delete $item->{prev};
     delete $item->{next};
@@ -342,14 +387,21 @@ sub parse_line {
         }
         return if !$data;
 
-        my $flattened = {%{ $data->{Request} }, %{ $data->{Session} }, Expires => time + $EXPIRES, Stage => $stage };
+        my $flattened = {%{ $data->{Request} }, %{ $data->{Session} }, Stage => $stage };
 
         # Turn the date into 64 bit integer
         if ($date =~ /^(\d+)\.(\d+)$/) {
             $flattened->{Date} = (Math::BigInt->new($1) * 1000000 + Math::BigInt->new($2))->bstr;
+
+            # We will use the Unixtime seconds to work out if the log event has expired..
+            $flattened->{Unixtime} = $1;
         }
         else {
             $flattened->{Date} = $date;
+            #
+            # We failed to get date as seconds.microseconds so lets use now for Unixtime - this is ugly
+            #
+            $flattened->{Unixtime} = time;
         }
         $flattened->{Uuid} = md5_hex( join('|', @$flattened{@UUID_FIELDS}) );
         return $flattened;
@@ -379,8 +431,7 @@ sub restore_linked_items {
     }
 
     foreach my $item (@$items) {
-        $item->{Expires} = time + $EXPIRES;
-        add_item_to_list_end($item);
+        add_item_to_list($item);
         $lines_by_uuid->{ $item->{Uuid} } = $item;
     }
 }
@@ -389,7 +440,7 @@ sub save_linked_items {
     my ($file) = @_;
 
     my @to_write;
-    my $item = $items_by_date_start;
+    my $item = $items_by_utime_start;
 
     while ($item) {
         my $next = delete $item->{next};    
@@ -406,7 +457,7 @@ sub save_linked_items {
 
 sub usage {
     return $FindBin::Script . ' [--help|-h] [--pretty|-p] [--canonical|-c] [--state statefile]
-    [--wait|-w seconds] [--logfile|-l logfile]
+    [--wait|-w seconds] [--logfile|-l logfile] [--expires|-e seconds]
 Read from log data from freeradius using the govlogger and output structured JSON log events.
 Data is read until end of stream or file. The program uses a pidfile process_gov_logs.pid and
 exits with error of running more than once.
@@ -418,6 +469,9 @@ As some events may not be complete you can specify a state file to store remaini
 read at program start, and rewritten on exit allowing continual processing of log event without data loss.
 
    --canonical|-c Order fields alphanumerically
+   --expires|-e   The number of seconds before a log event is output if no post-auth message has been
+                  recieved. NOTE: Expiry is taken from the time on successive log events, not the time
+                  now, as we may have a log backlog and we would not want to exire each entry.
    --flush|-f     Push all data out at end, even if not complete log event, this is used mainly
                   during testing to ensure parsing split data file produces same output as single
                   datafile.
