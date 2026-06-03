@@ -35,7 +35,11 @@ my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
 my @FIELDS_TO_DEDUP = qw(Stage EAP-Type TLS-Session-Cipher-Suite);
 
 # Parse the many command line options...
-my ($pretty, $help, $canonical, $statefile, $flush, $logfile, $wait, $last_date_only, $drop_eap_peap, $expiry_seconds, $unittests);
+my (
+    $pretty, $help, $canonical, $statefile, $flush,
+    $logfile, $wait, $last_date_only, $drop_eap_peap,
+    $expiry_seconds, $unittests, $reduce_duplicates);
+
 Getopt::Long::GetOptions(
     canonical             => \$canonical,
     'expires=i'           => \$expiry_seconds,
@@ -43,6 +47,7 @@ Getopt::Long::GetOptions(
     help                  => \$help,
     'logfile=s'           => \$logfile,
     pretty                => \$pretty,
+    reduce_duplicates     => \$reduce_duplicates,
     reduce_last_date_only => \$last_date_only,
     reduce_drop_eap_peap  => \$drop_eap_peap,
     'state=s'             => \$statefile,
@@ -192,7 +197,7 @@ while (my $line = $ih->getline) {
             $entry->{StartDate} = $data->{Date};
         }
         else {
-            push @ {$entry->{lines} }, $data;
+            push @{ $entry->{lines} }, $data;
         }
     }
 
@@ -273,7 +278,7 @@ sub send_to_log {
         # If TLS Session info same as previous - dont log...
 
         # If we have lines with repeating patterns - we can sqaush them together
-        if ($previous_line) {
+        if ($reduce_duplicates && $previous_line) {
             my $dedup_count = 0;
             foreach my $dedup_field (@FIELDS_TO_DEDUP) {
 
@@ -416,9 +421,10 @@ sub parse_line {
         }
         return if !$data;
 
+        # Put session and request vars into same map, and add the Stage
         my $flattened = {%{ $data->{Request} }, %{ $data->{Session} }, Stage => $stage };
 
-        # Turn the date into 64 bit integer
+        # Turn the date into 64 bit integer, unixtime * 1,000,000 with microseconds added
         if ($date =~ /^(\d+)\.(\d+)$/) {
             $flattened->{Date} = (Math::BigInt->new($1) * 1000000 + Math::BigInt->new($2))->bstr;
 
@@ -509,8 +515,10 @@ read at program start, and rewritten on exit allowing continual processing of lo
    --logfile|-l   By default the program reads from stdin, if specified the file is renamed \'.rotated\'
                   and a then \'delay\' seconds are allowed to elapse before the file is opened for processing.
    --pretty|-p    Produces pretty JSON
+   --reduce_duplicates     For repeated packets, such as those during a TLS key exchange only log a single
+                           line with an array of dates for each packet.
    --reduce_last_date_only Only show the last date for entries with identical data, i.e. TLS negotiation
-                           which would have 6 events logged.
+                           which would have 6 events logged. (Only works if reduce_duplicates enabled)
    --reduce_drop_eap_peap  Drop EAP-PEAP log events.
    --state|-s     Filename to restore and store state between invocations
    --wait|-w      Specify the number of seconds to wait when rotating an input file before processing
