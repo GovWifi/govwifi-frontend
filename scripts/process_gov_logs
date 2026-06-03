@@ -57,6 +57,8 @@ if ($help) {
     exit;
 }
 
+$expiry_seconds ||= 30;
+
 # Nasty having unit tests in program - but it was quick
 if ($unittests) {
     unittests();
@@ -161,13 +163,14 @@ while (my $line = $ih->getline) {
     # We use the Uuid to identify packets from same client, this might not be right,
     # but best we can do
     my $Uuid  = $data->{Uuid};
+    my $unixtime = delete $data->{Unixtime};
 
     my $entry = delete $lines_by_uuid->{$Uuid};
 
     # If we have a previous line by this Uuid add data to it
     if ($entry) {
         remove_item_from_linked_list($entry);
-        $entry->{Unixtime} = $data->{Unixtime};
+        $entry->{Unixtime} = $unixtime;
         push @{ $entry->{lines} }, $data;
     }
 
@@ -176,7 +179,7 @@ while (my $line = $ih->getline) {
     #
     else {
         $entry = {
-            Expires      => $data->{Expires},
+            Unixtime     => $unixtime,
             Uuid         => $Uuid,
             lines        => [],
         };
@@ -266,13 +269,12 @@ sub send_to_log {
 
     my $previous_line;
     LINE: foreach my $line (@$lines) {
-        delete @$line{(@COMMON_FIELDS, 'Expires', 'Uuid', 'State')};
+        delete @$line{(@COMMON_FIELDS, 'Expires', 'Uuid')};
         # If TLS Session info same as previous - dont log...
 
-        # Some fields may repeat - replace with "-" if same as previous
-        my $dedup_count = 0;
-
+        # If we have lines with repeating patterns - we can sqaush them together
         if ($previous_line) {
+            my $dedup_count = 0;
             foreach my $dedup_field (@FIELDS_TO_DEDUP) {
 
                 my $last_value = $previous_line->{$dedup_field};
@@ -286,8 +288,10 @@ sub send_to_log {
                 }
             }
 
+            # Get the key count for the previous and this line
             my $key_count = scalar keys %$line;
             my $previous_key_count = scalar keys %$previous_line;
+
             if (($dedup_count == $key_count - 1) && ($key_count == $previous_key_count)) {
                 #
                 # Squash identical lines to array of dates, or just the last date
@@ -497,6 +501,7 @@ read at program start, and rewritten on exit allowing continual processing of lo
    --expires|-e   The number of seconds before a log event is output if no post-auth message has been
                   recieved. NOTE: Expiry is taken from the time on successive log events, not the time
                   now, as we may have a log backlog and we would not want to exire each entry.
+                  Defaults to 30.
    --flush|-f     Push all data out at end, even if not complete log event, this is used mainly
                   during testing to ensure parsing split data file produces same output as single
                   datafile.
