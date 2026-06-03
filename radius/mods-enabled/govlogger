@@ -97,20 +97,20 @@ govlogger {
 
     # The script for handling the logs
     # Stderr should go somewhere sensible and stdout could go through a pipe somewhere
-    log_prog_command = "/usr/bin/process_gov_logs --pretty --canonical --state /healthcheck/statefile --reduce_last_date_only --reduce_drop_eap_peap --wait 6 --logfile ${log_file} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err"
+    log_prog_command = "/usr/bin/process_gov_logs --pretty --canonical --state /healthcheck/statefile --expires 30 --reduce_last_date_only --reduce_drop_eap_peap --wait 6 --logfile ${log_file} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err"
 
     # By lowering the nice level we do not affect freeradius operation
     log_prog_nice = 10
 
     post-auth {
-        govlogger_line = "%c.%M post-auth: {\"State\":\"%{State}\",\"Request\":%{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"eap_sessions\":%{govlogger:used_sessions}}\n"
+        govlogger_line = "%c.%M post-auth: {\"Request\":%{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"eap_sessions\":%{govlogger:used_sessions}}\n"
     }
 
     authorize {
-        govlogger_line = "%c.%M authorize: {\"State\":\"%{State}\",\"Request\":%{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"eap_sessions\":%{govlogger:used_sessions}}\n"
+        govlogger_line = "%c.%M authorize: {\"Request\":%{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"eap_sessions\":%{govlogger:used_sessions}}\n"
     }
 
     authenticate {
-        govlogger_line = "%c.%M authenticate: {\"State\":\"%{State}\",\"Request\": %{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"eap_sessions\":%{govlogger:used_sessions}}\n"
+        govlogger_line = "%c.%M authenticate: {\"Request\": %{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"eap_sessions\":%{govlogger:used_sessions}}\n"
     }
 }
