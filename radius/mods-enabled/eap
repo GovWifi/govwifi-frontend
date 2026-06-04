@@ -8,6 +8,7 @@
 		    client_hello_parse = yes
 			cipher_list = "ALL"
 			tls_min_version = "1.2"
+			tls_max_version = "1.3"
 			certificate_file = ${certdir}/server.pem
 			private_key_password = whatever
 			private_key_file = ${certdir}/server.key

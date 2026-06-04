@@ -38,7 +38,7 @@ jobs:
     needs: [check-ruby-setup]
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Update Ruby Version
         env:
