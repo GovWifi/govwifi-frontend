@@ -37,7 +37,8 @@ my @FIELDS_TO_DEDUP = qw(Stage EAP-Type TLS-Session-Cipher-Suite);
 my (
     $pretty, $help, $canonical, $statefile, $flush,
     $logfile, $wait, $last_date_only, $drop_eap_peap,
-    $expiry_seconds, $unittests, $reduce_duplicates);
+    $expiry_seconds, $unittests, $reduce_duplicates,
+    $reduce_freeradius_proxied);
 
 Getopt::Long::GetOptions(
     canonical             => \$canonical,
@@ -49,6 +50,7 @@ Getopt::Long::GetOptions(
     reduce_duplicates     => \$reduce_duplicates,
     reduce_last_date_only => \$last_date_only,
     reduce_drop_eap_peap  => \$drop_eap_peap,
+    reduce_freeradius_proxied => \$reduce_freeradius_proxied,
     'state=s'             => \$statefile,
     unittests             => \$unittests,
     'wait=i'              => \$wait,
@@ -79,6 +81,7 @@ if ($unittests) {
 }
 
 # Ensure we are not already running by getting an exlusive filelock on a pid file
+# DO NOT CLOSE the file until our work is done - else somebody else will start work
 my $pid_filename = '/var/run/lock/process_gov_logs.pid';
 my $pid_filehandle = create_pid_file($pid_filename);
 
@@ -89,7 +92,7 @@ my $items_by_utime_start;
 my $items_by_utime_end;
 
 #
-# Handle previous state, and saving state at the end
+# Read previous state
 #
 my $state_handle;
 if ($statefile) {
@@ -162,7 +165,7 @@ while (my $line = $ih->getline) {
     next if !$data;
 
     # We are not interested in proxied data - as EAP-PEAP
-    next if $data->{'FreeRADIUS-Proxied-To'};
+    next if $reduce_freeradius_proxied && $data->{'FreeRADIUS-Proxied-To'};
 
     # We use the Uuid to identify packets from same client, this might not be right,
     # but best we can do
@@ -230,19 +233,18 @@ while (my $line = $ih->getline) {
     }
 }
 
-#
-# If we have a state file to store items remaining
-# output the data to this file and exit
-#
-if ($state_handle) {
-    save_linked_items($state_handle);
-}
-else {
+# If we are flushing, or no state file specified do not write state file, just output remaining items
+if ($flush || !$statefile) {
     # Otherwise output the remaining items
     while ($items_by_utime_start) {
         send_to_log($items_by_utime_start);
         $items_by_utime_start = $items_by_utime_start->{next};
     }
+}
+elsif ($statefile) {
+    $state_handle = IO::File->new($statefile, 'w')
+        or die("Cannot open $statefile for write: $!\n");
+    save_linked_items($state_handle);
 }
 
 # Have we got a rotated file - we've processed it - so delete
@@ -253,7 +255,6 @@ unlink $rotated_file if $rotated_file;
 # it no longer matters....
 unlink $pid_filename;
 exit;
-
 
 sub send_to_log {
     my ($item) = @_;
@@ -524,6 +525,7 @@ read at program start, and rewritten on exit allowing continual processing of lo
    --pretty|-p    Produces pretty JSON
    --reduce_duplicates     For repeated packets, such as those during a TLS key exchange only log a single
                            line with an array of dates for each packet.
+   --reduce_freeradius_proxied This skips lines with the attribute "FreeRADIUS-Proxied-To" defined.
    --reduce_last_date_only Only show the last date for entries with identical data, i.e. TLS negotiation
                            which would have 6 events logged. (Only works if reduce_duplicates enabled)
    --reduce_drop_eap_peap  Drop EAP-PEAP log events.
@@ -666,7 +668,7 @@ sub unittests {
     # Now check the saving of state works
     my $fh = IO::File->new('/tmp/banana','w');
     save_linked_items($fh);
-    my $fh = IO::File->new('/tmp/banana','r');
+    $fh = IO::File->new('/tmp/banana','r');
     restore_linked_items($fh);
     check_items_in_right_order(@items);
     print "Items saved and restored from state file\n";
