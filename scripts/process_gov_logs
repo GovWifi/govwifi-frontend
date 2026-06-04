@@ -64,6 +64,15 @@ if ($help) {
 
 $expiry_seconds ||= 30;
 
+#
+# Create JSON output formatter and parser
+#
+$pretty ||= 0;
+$canonical ||= 0;
+my $json = JSON->new;
+$json->pretty($pretty);
+$json->canonical($canonical);
+
 # Nasty having unit tests in program - but it was quick
 if ($unittests) {
     unittests();
@@ -73,15 +82,6 @@ if ($unittests) {
 # Ensure we are not already running by getting an exlusive filelock on a pid file
 my $pid_filename = '/var/run/lock/process_gov_logs.pid';
 my $pid_filehandle = create_pid_file($pid_filename);
-
-#
-# Create JSON output formatter and parser
-#
-$pretty ||= 0;
-$canonical ||= 0;
-my $json = JSON->new;
-$json->pretty($pretty);
-$json->canonical($canonical);
 
 # We keep loglines by Uuid and in a linked list (doubly)
 # We should probably have an object here as it's messy
@@ -450,6 +450,13 @@ sub parse_line {
 sub restore_linked_items {
     my ($file) = @_;
 
+    # Ensure list is empty
+    undef $items_by_utime_start;
+    undef $items_by_utime_end;
+
+    # And map by Uuid is empty
+    $lines_by_uuid = {};
+    
     my $text = '';
     while (my $line = $file->getline) {
         $text .= $line;
@@ -486,6 +493,7 @@ sub save_linked_items {
     }
 
     $file->print($json->encode(\@to_write));
+    $file->flush;
 }
 
         
@@ -521,6 +529,7 @@ read at program start, and rewritten on exit allowing continual processing of lo
                            which would have 6 events logged. (Only works if reduce_duplicates enabled)
    --reduce_drop_eap_peap  Drop EAP-PEAP log events.
    --state|-s     Filename to restore and store state between invocations
+   --unittests|-u Run unit tests on methods in code
    --wait|-w      Specify the number of seconds to wait when rotating an input file before processing
                   thus allowing all writers to have closed the file descriptor
 ';
@@ -603,11 +612,11 @@ sub unittests {
     # Check linked list
     #
     my @items = (
-        { name => 'entry0', Unixtime => 8 },
-        { name => 'entry1', Unixtime => 10 },
-        { name => 'entry2', Unixtime => 12 },
-        { name => 'entry3', Unixtime => 14 },
-        { name => 'entry4', Unixtime => 16 },
+        { name => 'entry0', Uuid => 1, Unixtime => 8 },
+        { name => 'entry1', Uuid => 2, Unixtime => 10 },
+        { name => 'entry2', Uuid => 3, Unixtime => 12 },
+        { name => 'entry3', Uuid => 4, Unixtime => 14 },
+        { name => 'entry4', Uuid => 5, Unixtime => 16 },
     );
         
     add_item_to_list($items[1]);
@@ -653,6 +662,15 @@ sub unittests {
     add_item_to_list($items[1]);
     remove_item_from_linked_list($items[3]);
     check_items_in_right_order($items[0], $items[1], $items[2], $items[4]);
+    add_item_to_list($items[3]);
+
+    # Now check the saving of state works
+    my $fh = IO::File->new('/tmp/banana','w');
+    save_linked_items($fh);
+    my $fh = IO::File->new('/tmp/banana','r');
+    restore_linked_items($fh);
+    check_items_in_right_order(@items);
+    print "Items saved and restored from state file\n";
 }
 
 sub check_items_in_right_order {
