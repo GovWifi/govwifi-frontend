@@ -18,7 +18,8 @@ Makefile targets are:
 
 ## Components
 
-This project has three main components: the RADIUS server, the [FreeRADIUS Prometheus Exporter][prometheus-exporter], and the healthcheck service.
+This project has four main components: the RADIUS server, the [FreeRADIUS Prometheus Exporter][prometheus-exporter], the healthcheck service
+and the govlogger module for logging additional data and passing to a post processing command.
 
 This RADIUS server is restarted daily by a separate app, the [Safe Restarter][safe-restarter].
 
@@ -40,6 +41,17 @@ Our servers implement:
 
 - EAP-TLS (client certificate authentication)
 - PEAP-MSCHAPv2 (Protected EAP with username + password)
+
+### Govlogger module
+
+The govlogger module https://github.com/GovWifi/govwifi-radius-custom-module.git is written for fast logging
+to a file. It has simple locking mechanisms to allow easy file rotation by a rename and wait. A rotation script
+can be configured to be run periodically.
+
+Two environment variables can be set to control the behaviour of the govlogger:
+
+- **GOVLOGGER_FILE** The file that the govlogger module logs to (defaulting to /healthcheck/govlogs.log)
+- **GOVLOGGER_LOG_PROG_COMMAND** The command run to process the logs (defaulting to "/usr/bin/process_gov_logs --pretty --canonical --state /healthcheck/statefile --expires 30 --reduce_duplicates --reduce_freeradius_proxied --reduce_last_date_only --reduce_drop_eap_peap --wait 6 --logfile ${GOVLOGGER_FILE} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err")
 
 #### Files
 
