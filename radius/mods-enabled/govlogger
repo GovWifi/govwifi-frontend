@@ -87,7 +87,7 @@ govlogger {
 
 	}
 
-    log_file = "govlogs.log"
+    log_file = $ENV{GOVLOGGER_FILE}
 
     # How long for log rotate program to wait to ensure file closed...
     rotate_wait_seconds = 5
@@ -97,7 +97,7 @@ govlogger {
 
     # The script for handling the logs
     # Stderr should go somewhere sensible and stdout could go through a pipe somewhere
-    log_prog_command = "/usr/bin/process_gov_logs --pretty --canonical --state /healthcheck/statefile --expires 30 --reduce_duplicates --reduce_freeradius_proxied --reduce_last_date_only --reduce_drop_eap_peap --wait 6 --logfile ${log_file} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err"
+    log_prog_command = $ENV{GOVLOGGER_LOG_PROG_COMMAND}
 
     # By lowering the nice level we do not affect freeradius operation
     log_prog_nice = 10
