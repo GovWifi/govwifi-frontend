@@ -31,7 +31,7 @@ my @COMMON_FIELDS   = qw(Connect-Info Framed-MTU Calling-Station-Id User-Name NA
 my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
 
 # Fields used to deduplicate packets between requests
-my @FIELDS_TO_DEDUP = qw(Stage EAP-Type TLS-Session-Cipher-Suite);
+my @FIELDS_TO_DEDUP = qw(Stage EAP-Type);
 
 # Parse the many command line options...
 my (
@@ -68,11 +68,7 @@ $expiry_seconds ||= 30;
 #
 # Create JSON output formatter and parser
 #
-$pretty ||= 0;
-$canonical ||= 0;
-my $json = JSON->new;
-$json->pretty($pretty);
-$json->canonical($canonical);
+my $json = JSON->new->pretty($pretty || 0)->canonical($canonical || 0);
 
 # Nasty having unit tests in program - but it was quick
 if ($unittests) {
@@ -190,10 +186,9 @@ while (my $line = $ih->getline) {
             Uuid         => $Uuid,
             lines        => [],
         };
-
         #
         # If an identity packet - lets mark this as start and log nothing
-        # We just set the StartDate for the events
+        # We just set the StartDate for the events - further reducing amount of data
         #
         if (($data->{'EAP-Type'} eq 'Identity') && ($data->{Stage} eq 'authorize')) {
             $entry->{StartDate} = $data->{Date};
@@ -219,16 +214,17 @@ while (my $line = $ih->getline) {
     my $expiry_date = $entry->{Unixtime} - $expiry_seconds;
 
     # Delete items in linked list that have expired, these will be at the start
+    # as the list is ordered by the Unixtime - so this is fast
     my $item = $items_by_utime_start;
     while ($item && ($item->{Unixtime} < $expiry_date)) {
         # Remove item from linked list
-        remove_item_from_linked_list($item);
-    
         # Remove from Uuid map
+        # Output the log data
+        remove_item_from_linked_list($item);
         delete $lines_by_uuid->{$item->{Uuid}};
-
-        # Log and look at next item
         send_to_log($item);
+    
+        # Move to next item
         $item = $item->{next};
     }
 }
@@ -259,7 +255,7 @@ exit;
 sub send_to_log {
     my ($item) = @_;
 
-    # Get shared data
+    # To deduplicate the lines we run them backwards so we get the last date not the first
     my $lines = $item->{lines};
 
     my $last_line = $lines->[$#$lines];
@@ -267,57 +263,59 @@ sub send_to_log {
     # If option reduce_drop_eap_peap we skip PEAP messages
     return if $drop_eap_peap && $last_line->{'EAP-Type'} eq 'PEAP';
 
-    my $shared = { StartDate => $item->{StartDate }};
+    # Copy the start date into the shared data and copy the rest from the first log item
+    my $shared = { StartDate => $item->{StartDate} };
     foreach my $field (@COMMON_FIELDS) {
         $shared->{$field} = $last_line->{$field};
     }
 
-    my $previous_line;
+    my $prev_line = {};
     LINE: foreach my $line (@$lines) {
-        delete @$line{(@COMMON_FIELDS, 'Expires', 'Uuid')};
-        # If TLS Session info same as previous - dont log...
+        delete @$line{(@COMMON_FIELDS, 'Uuid')};
 
-        # If we have lines with repeating patterns - we can sqaush them together
-        if ($reduce_duplicates && $previous_line) {
-            my $dedup_count = 0;
-            foreach my $dedup_field (@FIELDS_TO_DEDUP) {
+        # If the reduce_duplicates option is set we compare @FIELDS_TO_DEDUP
+        # and if the same compress the line into a set of dates
+        if ($reduce_duplicates) {
+            my $is_same = 0;
+            if ($prev_line) {
+                $is_same = 1;
+                DEDUP: foreach my $field (@FIELDS_TO_DEDUP) {
+                    # If the value is an array we need to squash it - hence JSON
+                    my $cur_val = $line->{$field};
+                    $cur_val = $json->encode($cur_val) if ref($cur_val);
 
-                my $last_value = $previous_line->{$dedup_field};
-                my $current_value = $line->{$dedup_field};
-                $current_value = $json->encode($current_value) if ref($current_value);
+                    my $prev_val = $prev_line->{$field};
+                    $prev_val = $json->encode($prev_val) if ref($prev_val);
 
-                if ($last_value && $current_value) {
-                    if ($last_value eq $current_value) {
-                        $dedup_count++;
+                    # If either field not present or they are not equal we are not the same
+                    if (!defined($cur_val) || !defined($prev_val) || ($cur_val ne $prev_val)) {
+                        $is_same = 0;
+                        last DEDUP;
                     }
                 }
             }
 
-            # Get the key count for the previous and this line
-            my $key_count = scalar keys %$line;
-            my $previous_key_count = scalar keys %$previous_line;
-
-            if (($dedup_count == $key_count - 1) && ($key_count == $previous_key_count)) {
+            if ($is_same) {
                 #
                 # Squash identical lines to array of dates, or just the last date
                 # if reduce_last_date_only option set
                 #
                 if ($last_date_only) {
-                    $previous_line->{Date} = $line->{Date};
+                    $prev_line->{Date} = $line->{Date};
                 }
                 else {
-                    my $date = $previous_line->{Date};
+                    my $date = $prev_line->{Date};
                     if (ref($date)) {
                         push @$date, $line->{Date};
                     }
                     else {
-                        $previous_line->{Date} = [ $previous_line->{Date}, $line->{Date} ];
+                        $prev_line->{Date} = [ $prev_line->{Date}, $line->{Date} ];
                     }
                 }
                 next LINE;
             }
         }
-        $previous_line = $line;
+        $prev_line = $line;
         push @{ $shared->{lines} }, $line;
     }
     print  $json->encode($shared),"\n";
