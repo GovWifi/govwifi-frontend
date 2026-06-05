@@ -25,7 +25,7 @@ use Math::BigInt ();
 # be far ahead of the current line being processed. This is subtle.
 
 # Fields shared between requests
-my @COMMON_FIELDS   = qw(Connect-Info Framed-MTU Calling-Station-Id User-Name NAS-Port-Type NAS-IP-Address eap_sessions);
+my @COMMON_FIELDS   = qw(Connect-Info Framed-MTU Calling-Station-Id User-Name NAS-Port-Type NAS-IP-Address EapSessions);
 
 # Fields used to create a UUID for the request
 my @UUID_FIELDS     = qw(User-Name NAS-IP-Address Calling-Station-Id);
@@ -420,7 +420,7 @@ sub parse_line {
         return if !$data;
 
         # Put session and request vars into same map, and add the Stage
-        my $flattened = {%{ $data->{Request} }, %{ $data->{Session} }, Stage => $stage };
+        my $flattened = {%{ $data->{Request} }, %{ $data->{Session} }, Stage => $stage, EapSessions => $data->{EapSessions} };
 
         # Turn the date into 64 bit integer, unixtime * 1,000,000 with microseconds added
         if ($date =~ /^(\d+)\.(\d+)$/) {
