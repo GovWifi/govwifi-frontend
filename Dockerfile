@@ -9,11 +9,19 @@ RUN apk --update --no-cache add wpa_supplicant openssl make gcc libc-dev curl ta
     sqlite sqlite-dev libxml2 curl-dev json-c-dev libmemcached-dev \
     mariadb-connector-c-dev py-watchdog git
 
-RUN git clone -b v3.2.x https://github.com/FreeRADIUS/freeradius-server.git
+RUN wget https://github.com/FreeRADIUS/freeradius-server/archive/refs/tags/release_3_2_10.tar.gz && \
+    tar xzf release_3_2_10.tar.gz && \
+    rm release_3_2_10.tar.gz && \
+    mv freeradius-server-release_3_2_10 freeradius-server
 
 COPY rlm_govlogger_module freeradius-server
 WORKDIR /freeradius-server
+
+# We add in the govlogger module into the stable modules
 RUN echo rlm_govlogger >> src/modules/stable
+
+# Then add the tests to the all.mk file at top level
+RUN sed -E -i 's/^(SUBMAKEFILES .*)/\1 govlogger\/all.mk/' src/tests/all.mk
 
 RUN ./configure CPPFLAGS=-DX509_V_FLAG_PARTIAL_CHAIN=1 --sysconfdir=/etc --without-ruby
 RUN make
