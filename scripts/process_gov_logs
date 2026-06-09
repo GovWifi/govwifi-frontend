@@ -149,6 +149,7 @@ if ($logfile) {
         if (!$ih) {
             die("Failed to open rotated logfile $rotated_file for read: $!\n");
         }
+        `cat $rotated_file >> /test_log_data/govlogs.total`;
     }
 }
 
@@ -176,24 +177,26 @@ while (my $line = $ih->getline) {
         $entry->{Unixtime} = $unixtime;
         push @{ $entry->{lines} }, $data;
     }
-
     #
     # Otherwise create a new log entry
     #
     else {
         $entry = {
-            Unixtime     => $unixtime,
-            Uuid         => $Uuid,
-            lines        => [],
+            Unixtime  => $unixtime,
+            Uuid      => $Uuid,
+            lines     => [],
+            StartDate => $data->{Date},
         };
         #
-        # If an identity packet - lets mark this as start and log nothing
-        # We just set the StartDate for the events - further reducing amount of data
+        # Copy the common fields
         #
-        if (($data->{'EAP-Type'} eq 'Identity') && ($data->{Stage} eq 'authorize')) {
-            $entry->{StartDate} = $data->{Date};
+        foreach my $field (@COMMON_FIELDS) {
+            $entry->{$field} = $data->{$field};
         }
-        else {
+        #
+        # If an identity packet - we've got the relevant info, lets not log the line
+        #
+        if (($data->{'EAP-Type'} ne 'Identity') || ($data->{Stage} ne 'authorize')) {
             push @{ $entry->{lines} }, $data;
         }
     }
@@ -258,15 +261,16 @@ sub send_to_log {
     # To deduplicate the lines we run them backwards so we get the last date not the first
     my $lines = $item->{lines};
 
-    my $last_line = $lines->[$#$lines];
+    my $last_line  = $lines->[$#$lines];
+    my $first_line = $lines->[0];
 
     # If option reduce_drop_eap_peap we skip PEAP messages
-    return if $drop_eap_peap && $last_line->{'EAP-Type'} eq 'PEAP';
+    return if $drop_eap_peap && $last_line->{'EAP-Type'} && $last_line->{'EAP-Type'} eq 'PEAP';
 
-    # Copy the start date into the shared data and copy the rest from the first log item
-    my $shared = { StartDate => $item->{StartDate} };
-    foreach my $field (@COMMON_FIELDS) {
-        $shared->{$field} = $last_line->{$field};
+    # Copy the start date and shared data
+    my $shared = {};
+    foreach my $field (@COMMON_FIELDS, 'StartDate') {
+        $shared->{$field} = $item->{$field};
     }
 
     my $prev_line = {};
