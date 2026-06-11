@@ -10,15 +10,19 @@ use Getopt::Long ();
 use JSON ();
 use Math::BigInt ();
 
+sub Math::BigInt::TO_JSON {
+    my ($item) = @_;
+    return $item->bstr;
+}
+
 # Important things to note regarding this script:
 #   1. Gets an exclusive lock on pid file (LOCK_EX) nonblocking - and exits on failure,
 #      this ensures only one script can run at a time, the lock is released on program
 #      completion. (flocks in unix are released when process exits - unlike windows)
-#   2. It checks for rotated file - and if present logs error and reprocesses it
-#   3. If no rotated file, rotates the file, sleeps for period to allow the govlogger
-#      module to close all descriptors
-#   4. Reads in the previous unprocessed log items, and then starts processing the log lines
-#   5. At end of file, writes out unprocessed log items and deletes rotated logfile.
+#   2. Reads historic state data saved in the state file
+#   3. Opens the logfile if supplied
+#   4. Reads input from stream until end of file
+#   5. Writes out unprocessed log items to state file
 #
 # The expiry of uncomplete log lines is important. The time to expire is taken from the time
 # of the log line being processed, not the time now - this helps if we have a logging backlog, as now may
@@ -36,12 +40,13 @@ my @FIELDS_TO_DEDUP = qw(Stage EAP-Type);
 # Parse the many command line options...
 my (
     $pretty, $help, $canonical, $statefile, $flush,
-    $logfile, $wait, $last_date_only, $drop_eap_peap,
+    $delete, $logfile, $last_date_only, $drop_eap_peap,
     $expiry_seconds, $unittests, $reduce_duplicates,
     $reduce_freeradius_proxied);
 
 Getopt::Long::GetOptions(
     canonical             => \$canonical,
+    delete                => \$delete,
     'expires=i'           => \$expiry_seconds,
     flush                 => \$flush,
     help                  => \$help,
@@ -53,7 +58,6 @@ Getopt::Long::GetOptions(
     reduce_freeradius_proxied => \$reduce_freeradius_proxied,
     'state=s'             => \$statefile,
     unittests             => \$unittests,
-    'wait=i'              => \$wait,
 )
     or die("Invalid command line options:\n" . usage());
 
@@ -68,7 +72,7 @@ $expiry_seconds ||= 30;
 #
 # Create JSON output formatter and parser
 #
-my $json = JSON->new->pretty($pretty || 0)->canonical($canonical || 0);
+my $json = JSON->new->pretty($pretty || 0)->canonical($canonical || 0)->convert_blessed(1);
 
 # Nasty having unit tests in program - but it was quick
 if ($unittests) {
@@ -104,52 +108,25 @@ if ($statefile) {
 
     # If we are flushing all output - we will not leave any state remaining...
     if ($flush) {
+        print STDERR "Deleting old statefile $statefile as flush specified\n";
         undef $state_handle;
         unlink $statefile;
     }
     else {
         $state_handle = IO::File->new($statefile, 'w')
             or die("Cannot open $statefile for write: $!\n");
-        print STDERR "Opened $statefile write for remaining event on exit\n";
+        print STDERR "Opened state file $statefile to write remaining events on exit\n";
     }
 }
 
 #
-# By default read from STDIN, but if file specified, see if rotated file,
-# if rotated file process that, and exit, else rotate...
+# By default read from STDIN, but if file specified use this
 #
 my $ih = *STDIN;
-my $rotated_file;
 if ($logfile) {
-    # We cannot rotate if the wait time has not been specified
-    die("Cannot rotate logfile as no wait specified\n" . usage()) if !$wait;
-
-    $rotated_file = "$logfile.rotated";
-
-    # Is there a rotated logfile???
-    $ih = IO::File->new($rotated_file, 'r');
-    if ($ih) {
-        print STDERR "Previous rotated file $rotated_file failed to be processed.... trying again\n";
-    }
-    else {
-        # No existing rotated logfile - rotate, wait then process...
-        # there is no race condition here as we have a lock and nobody
-        # else whould be rotating the logfile
-        if (!rename($logfile, $rotated_file)) {
-            die("Failed to rename $logfile to $rotated_file: $!\n");
-        }
-        print STDERR "Renamed $logfile $rotated_file\n";
-        
-        # Now sleep until freeradius has finished writing....
-        print STDERR "Sleeping for $wait seconds before processing $rotated_file\n";
-        sleep $wait;
-
-        # Finally open file read
-        $ih = IO::File->new($rotated_file, 'r');
-        if (!$ih) {
-            die("Failed to open rotated logfile $rotated_file for read: $!\n");
-        }
-        `cat $rotated_file >> /test_log_data/govlogs.total`;
+    $ih = IO::File->new($logfile, 'r');
+    if (!$ih) {
+        die("Failed to open logfile $logfile for read: $!\n");
     }
 }
 
@@ -167,14 +144,12 @@ while (my $line = $ih->getline) {
     # We use the Uuid to identify packets from same client, this might not be right,
     # but best we can do
     my $Uuid  = $data->{Uuid};
-    my $unixtime = delete $data->{Unixtime};
 
     my $entry = delete $lines_by_uuid->{$Uuid};
 
     # If we have a previous line by this Uuid add data to it
     if ($entry) {
         remove_item_from_linked_list($entry);
-        $entry->{Unixtime} = $unixtime;
         push @{ $entry->{lines} }, $data;
     }
     #
@@ -182,7 +157,6 @@ while (my $line = $ih->getline) {
     #
     else {
         $entry = {
-            Unixtime  => $unixtime,
             Uuid      => $Uuid,
             lines     => [],
             StartDate => $data->{Date},
@@ -212,14 +186,14 @@ while (my $line = $ih->getline) {
     $lines_by_uuid->{$Uuid} = $entry;
     add_item_to_list($entry);
 
-    # As we have a log event we have the Unixtime, we can use this to expire older items in the
+    # As we have a log event we have the StartDate, we can use this to expire older items in the
     # linked list
-    my $expiry_date = $entry->{Unixtime} - $expiry_seconds;
+    my $expiry_date = $entry->{StartDate} - (Math::BigInt->new('1000000') * $expiry_seconds);
 
     # Delete items in linked list that have expired, these will be at the start
-    # as the list is ordered by the Unixtime - so this is fast
+    # as the list is ordered by the UnixTime * 1000000 (with microsecirds) - so this is fast
     my $item = $items_by_utime_start;
-    while ($item && ($item->{Unixtime} < $expiry_date)) {
+    while ($item && ($item->{StartDate} < $expiry_date)) {
         # Remove item from linked list
         # Remove from Uuid map
         # Output the log data
@@ -246,13 +220,17 @@ elsif ($statefile) {
     save_linked_items($state_handle);
 }
 
-# Have we got a rotated file - we've processed it - so delete
-unlink $rotated_file if $rotated_file;
+# If delete specified and file provided delete on success
+if ($logfile && $delete) {
+    $ih->close;
+    unlink($logfile);
+}
 
 # Finally we should delete the pidfile (for cleanliness)
 # Note we delete first, which does allow somebody to start running here, but as we are all done
 # it no longer matters....
 unlink $pid_filename;
+
 exit;
 
 sub send_to_log {
@@ -301,20 +279,20 @@ sub send_to_log {
 
             if ($is_same) {
                 #
-                # Squash identical lines to array of dates, or just the last date
-                # if reduce_last_date_only option set
+                # If the same record the latest values, not the previous as in TLS exchanges the last has
+                # the interesting data
                 #
-                if ($last_date_only) {
-                    $prev_line->{Date} = $line->{Date};
-                }
-                else {
-                    my $date = $prev_line->{Date};
-                    if (ref($date)) {
-                        push @$date, $line->{Date};
+                foreach my $key (keys %$line) {
+                    if ($key eq 'Date' && !$last_date_only) {
+                        my $date = $prev_line->{Date};
+                        if (ref($date)) {
+                            push @$date, $line->{Date};
+                        }
+                        else {
+                            $prev_line->{Date} = [ $prev_line->{Date}, $line->{Date} ];
+                        }
                     }
-                    else {
-                        $prev_line->{Date} = [ $prev_line->{Date}, $line->{Date} ];
-                    }
+                    $prev_line->{$key} = $line->{$key};
                 }
                 next LINE;
             }
@@ -338,12 +316,12 @@ sub add_item_to_list {
     # It is most likely the expiry time will be greater than the end of the list
     # so we will start looking at the end
 
-    my $utime = $item->{Unixtime};
+    my $datetime = $item->{StartDate};
 
     # After is the item we want to insert after....
     my $after = $items_by_utime_end;
     my $is_end = 1;
-    while ($after->{Unixtime} > $utime) {
+    while ($after->{StartDate} > $datetime) {
         $is_end = 0;
         my $previous = $after->{prev};
         
@@ -399,6 +377,7 @@ sub remove_item_from_linked_list {
     return $item;
 }
 
+my $prev;
 sub parse_line {
     my ($line) = @_;
 
@@ -428,17 +407,13 @@ sub parse_line {
 
         # Turn the date into 64 bit integer, unixtime * 1,000,000 with microseconds added
         if ($date =~ /^(\d+)\.(\d+)$/) {
-            $flattened->{Date} = (Math::BigInt->new($1) * 1000000 + Math::BigInt->new($2))->bstr;
-
-            # We will use the Unixtime seconds to work out if the log event has expired..
-            $flattened->{Unixtime} = $1;
+            # We will use a Bigint here
+            my $next = $flattened->{Date} = Math::BigInt->new($1) * 1000000 + Math::BigInt->new($2);
+            print STDERR "############ BANG $prev $next\n" if $prev && $prev > $next;
+            $prev = $next;
         }
         else {
             $flattened->{Date} = $date;
-            #
-            # We failed to get date as seconds.microseconds so lets use now for Unixtime - this is ugly
-            #
-            $flattened->{Unixtime} = time;
         }
         $flattened->{Uuid} = md5_hex( join('|', @$flattened{@UUID_FIELDS}) );
         return $flattened;
@@ -475,6 +450,7 @@ sub restore_linked_items {
     }
 
     foreach my $item (@$items) {
+        $item->{StartDate} = Math::BigInt->new($item->{StartDate});
         add_item_to_list($item);
         $lines_by_uuid->{ $item->{Uuid} } = $item;
     }
@@ -502,7 +478,7 @@ sub save_linked_items {
 
 sub usage {
     return $FindBin::Script . ' [--help|-h] [--pretty|-p] [--canonical|-c] [--state statefile]
-    [--wait|-w seconds] [--logfile|-l logfile] [--expires|-e seconds]
+    [--logfile|-l logfile] [--expires|-e seconds] [--delete|-d] ...
 Read from log data from freeradius using the govlogger and output structured JSON log events.
 Data is read until end of stream or file. The program uses a pidfile process_gov_logs.pid and
 exits with error of running more than once.
@@ -514,6 +490,7 @@ As some events may not be complete you can specify a state file to store remaini
 read at program start, and rewritten on exit allowing continual processing of log event without data loss.
 
    --canonical|-c Order fields alphanumerically
+   --delete|-d    Delete the logfile after successful processing
    --expires|-e   The number of seconds before a log event is output if no post-auth message has been
                   recieved. NOTE: Expiry is taken from the time on successive log events, not the time
                   now, as we may have a log backlog and we would not want to exire each entry.
@@ -533,8 +510,6 @@ read at program start, and rewritten on exit allowing continual processing of lo
    --reduce_drop_eap_peap  Drop EAP-PEAP log events.
    --state|-s     Filename to restore and store state between invocations
    --unittests|-u Run unit tests on methods in code
-   --wait|-w      Specify the number of seconds to wait when rotating an input file before processing
-                  thus allowing all writers to have closed the file descriptor
 ';
 }
 
@@ -615,11 +590,11 @@ sub unittests {
     # Check linked list
     #
     my @items = (
-        { name => 'entry0', Uuid => 1, Unixtime => 8 },
-        { name => 'entry1', Uuid => 2, Unixtime => 10 },
-        { name => 'entry2', Uuid => 3, Unixtime => 12 },
-        { name => 'entry3', Uuid => 4, Unixtime => 14 },
-        { name => 'entry4', Uuid => 5, Unixtime => 16 },
+        { name => 'entry0', Uuid => 1, StartDate => Math::BigInt->new(8) },
+        { name => 'entry1', Uuid => 2, StartDate => Math::BigInt->new(10) },
+        { name => 'entry2', Uuid => 3, StartDate => Math::BigInt->new(12) },
+        { name => 'entry3', Uuid => 4, StartDate => Math::BigInt->new(14) },
+        { name => 'entry4', Uuid => 5, StartDate => Math::BigInt->new(16) },
     );
         
     add_item_to_list($items[1]);
