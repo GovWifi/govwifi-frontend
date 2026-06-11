@@ -67,7 +67,7 @@ if ($help) {
     exit;
 }
 
-$expiry_seconds ||= 30;
+$expiry_seconds ||= 5;
 
 #
 # Create JSON output formatter and parser
@@ -494,7 +494,8 @@ read at program start, and rewritten on exit allowing continual processing of lo
    --expires|-e   The number of seconds before a log event is output if no post-auth message has been
                   recieved. NOTE: Expiry is taken from the time on successive log events, not the time
                   now, as we may have a log backlog and we would not want to exire each entry.
-                  Defaults to 30.
+                  The value defaults to 5. This number should be fairly small, the max time an access point
+                  authentication process would take (normally under a second).
    --flush|-f     Push all data out at end, even if not complete log event, this is used mainly
                   during testing to ensure parsing split data file produces same output as single
                   datafile.

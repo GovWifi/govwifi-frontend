@@ -13,7 +13,7 @@ if [ "x${ROTATED_GOVLOGGER_FILE}" == "x" ]; then
 fi
 
 if [ "x${GOVLOGGER_LOG_PROG_COMMAND}" == "x" ]; then
-    GOVLOGGER_LOG_PROG_COMMAND="/usr/bin/process_gov_logs --pretty --delete --canonical --state /healthcheck/statefile --expires 30 --reduce_duplicates --reduce_freeradius_proxied --reduce_last_date_only --reduce_drop_eap_peap --logfile ${ROTATED_GOVLOGGER_FILE} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err"
+    GOVLOGGER_LOG_PROG_COMMAND="/usr/bin/process_gov_logs --pretty --delete --canonical --state /healthcheck/statefile --expires 5 --reduce_duplicates --reduce_freeradius_proxied --reduce_last_date_only --reduce_drop_eap_peap --logfile ${ROTATED_GOVLOGGER_FILE} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err"
 fi
 
 export GOVLOGGER_FILE
