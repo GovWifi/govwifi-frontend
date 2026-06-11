@@ -87,13 +87,11 @@ govlogger {
 
 	}
 
-    log_file = $ENV{GOVLOGGER_FILE}
+    log_file         = $ENV{GOVLOGGER_FILE}
+    rotated_log_file = $ENV{ROTATED_GOVLOGGER_FILE}
 
     # How long for log rotate program to wait to ensure file closed...
-    rotate_wait_seconds = 5
-
-    # How often we run the log process script
-    log_prog_interval_seconds = 10
+    rotate_interval = 5
 
     # The script for handling the logs
     # Stderr should go somewhere sensible and stdout could go through a pipe somewhere
@@ -101,6 +99,8 @@ govlogger {
 
     # By lowering the nice level we do not affect freeradius operation
     log_prog_nice = 10
+
+    warn_if_rotated_file_present = yes
 
     post-auth {
         govlogger_line = "%c.%M post-auth: {\"Request\":%{govlogger_json:request:[*] !State !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"EapSessions\":%{govlogger:used_sessions}}\n"
