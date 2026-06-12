@@ -478,11 +478,9 @@ Read from log data from freeradius using the govlogger and output structured JSO
 Data is read until end of stream or file. The program uses a pidfile process_gov_logs.pid and
 exits with error of running more than once.
 
-If a logfile is specified it is rotated to a file logfile.rotated and the program waits for \'wait\'
-seconds before processing. This allows the govlogger to close the file cleanly.
-
-As some events may not be complete you can specify a state file to store remaining log events. This is
-read at program start, and rewritten on exit allowing continual processing of log event without data loss.
+As some events may not be complete you can specify a state file to store log events that have
+not completed. This is read at program start, and rewritten on exit allowing continual processing
+of log events without data loss.
 
    --canonical|-c Order fields alphanumerically
    --delete|-d    Delete the logfile after successful processing
