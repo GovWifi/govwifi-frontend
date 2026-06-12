@@ -31,7 +31,7 @@ govlogger {
 			#  with a prefix of "foo", `User-Name` will be output as
 			#  `foo:User-Name`.
 			#
-#			prefix =
+                        #prefix =
 		}
 
 		#
@@ -50,7 +50,7 @@ govlogger {
 			#  When this option is enabled, values will always be
 			#  added as an array.
 			#
-#			single_value_as_array = no
+                        #single_value_as_array = no
 
 			#
 			#  enum_as_integer:: output the integer value of
@@ -61,7 +61,7 @@ govlogger {
 			#  Enable this option to force the numeric value
 			#  instead.
 			#
-#			enum_as_integer = no
+                        #enum_as_integer = no
 
 			#
 			#  dates_as_integer:: output dates as seconds since the
@@ -72,7 +72,7 @@ govlogger {
 			#  Enable this option to force the date to be rendered
 			#  as seconds since the epoch instead.
 			#
-#			dates_as_integer = no
+                        #dates_as_integer = no
 
 			#
 			#  always_string:: force all values to be strings
@@ -82,7 +82,7 @@ govlogger {
 			#  this option to force all values to be as quoted
 			#  strings.
 			#
-#			always_string = no
+                        #always_string = no
 		}
 
 	}
@@ -101,6 +101,7 @@ govlogger {
     log_prog_nice = 10
 
     warn_if_rotated_file_present = yes
+    log_prog_keep_stderr = yes
 
     post-auth {
         govlogger_line = "%c.%M post-auth: {\"Request\":%{govlogger_json:request:[*] !State !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"EapSessions\":%{govlogger:used_sessions}}\n"

@@ -108,14 +108,12 @@ if ($statefile) {
 
     # If we are flushing all output - we will not leave any state remaining...
     if ($flush) {
-        print STDERR "Deleting old statefile $statefile as flush specified\n";
         undef $state_handle;
         unlink $statefile;
     }
     else {
         $state_handle = IO::File->new($statefile, 'w')
             or die("Cannot open $statefile for write: $!\n");
-        print STDERR "Opened state file $statefile to write remaining events on exit\n";
     }
 }
 
@@ -377,7 +375,6 @@ sub remove_item_from_linked_list {
     return $item;
 }
 
-my $prev;
 sub parse_line {
     my ($line) = @_;
 
@@ -408,9 +405,7 @@ sub parse_line {
         # Turn the date into 64 bit integer, unixtime * 1,000,000 with microseconds added
         if ($date =~ /^(\d+)\.(\d+)$/) {
             # We will use a Bigint here
-            my $next = $flattened->{Date} = Math::BigInt->new($1) * 1000000 + Math::BigInt->new($2);
-            print STDERR "############ BANG $prev $next\n" if $prev && $prev > $next;
-            $prev = $next;
+            $flattened->{Date} = Math::BigInt->new($1) * 1000000 + Math::BigInt->new($2);
         }
         else {
             $flattened->{Date} = $date;
