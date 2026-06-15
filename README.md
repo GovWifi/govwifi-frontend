@@ -44,9 +44,7 @@ Our servers implement:
 
 ### Govlogger module
 
-The govlogger module https://github.com/GovWifi/govwifi-radius-custom-module.git is written for fast logging
-to a file. It has simple locking mechanisms to allow easy file rotation by a rename and wait. A rotation script
-can be configured to be run periodically.
+        The govlogger module is a fast file logger with extended features. The code resides in the rlm_govlogger_module folder. See link [Govlogger Module](/rlm_govlogger_module/README)
 
 Three new environment variables can be set to control the behaviour of the govlogger:
 
