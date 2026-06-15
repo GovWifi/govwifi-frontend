@@ -42,7 +42,6 @@ server default {
   
   authenticate {
     eap
-    govlogger
   }
   
   preacct {
@@ -61,7 +60,9 @@ server default {
     }
     
     Post-Auth-Type REJECT {
-      govlogger
+      if (EAP-Type != "PEAP" && EAP-Type != "MSCHAPv2") {
+        govlogger
+      }
       redundant {
         rest
         fail

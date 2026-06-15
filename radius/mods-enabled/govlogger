@@ -110,8 +110,4 @@ govlogger {
     authorize {
         govlogger_line = "%c.%M authorize: {\"Request\":%{govlogger_json:request:[*] !State !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"EapSessions\":%{govlogger:used_sessions}}\n"
     }
-
-    authenticate {
-        govlogger_line = "%c.%M authenticate: {\"Request\": %{govlogger_json:request:[*] !State !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"EapSessions\":%{govlogger:used_sessions}}\n"
-    }
 }

@@ -16,7 +16,6 @@ server inner-tunnel {
             mschap
         }
         eap
-        govlogger
     }
 
     post-auth {
