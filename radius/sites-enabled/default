@@ -60,9 +60,7 @@ server default {
     }
     
     Post-Auth-Type REJECT {
-      if (EAP-Type != "PEAP" && EAP-Type != "MSCHAPv2") {
-        govlogger
-      }
+      govlogger
       redundant {
         rest
         fail
