@@ -48,10 +48,11 @@ The govlogger module https://github.com/GovWifi/govwifi-radius-custom-module.git
 to a file. It has simple locking mechanisms to allow easy file rotation by a rename and wait. A rotation script
 can be configured to be run periodically.
 
-Two environment variables can be set to control the behaviour of the govlogger:
+Three new environment variables can be set to control the behaviour of the govlogger:
 
-- **GOVLOGGER_FILE** The file that the govlogger module logs to (defaulting to /healthcheck/govlogs.log)
-- **GOVLOGGER_LOG_PROG_COMMAND** The command run to process the logs (defaulting to "/usr/bin/process_gov_logs --pretty --canonical --state /healthcheck/statefile --expires 30 --reduce_duplicates --reduce_freeradius_proxied --reduce_last_date_only --reduce_drop_eap_peap --wait 6 --logfile ${GOVLOGGER_FILE} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err")
+- **GOVLOGGER_FILE** The file that the govlogger module logs to (defaulting to "/healthcheck/govlogs.log")
+- **GOVLOGGER_LOG_PROG_COMMAND** The command run to process the logs (defaulting to "/usr/bin/process_gov_logs --pretty --delete --canonical --state /healthcheck/statefile --expires 5 --reduce_duplicates --reduce_freeradius_proxied --reduce_last_date_only --reduce_drop_eap_peap --logfile ${ROTATED_GOVLOGGER_FILE} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err")
+- **ROTATED_GOVLOGGER_FILE** The name of the rotated filename passed to the post processor script, defaulting to "/healthcheck/govlogs.rotated".
 
 #### Files
 
