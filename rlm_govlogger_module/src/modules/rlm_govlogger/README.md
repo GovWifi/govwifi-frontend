@@ -20,15 +20,13 @@ The parameters below have the default in brackets, if the default is M the param
 - **encode** Configuration section describing the govlogger_json xlat configuration.
 - **max_mmapped_mem_size** (104857600) If **talloc_debug_filename** has **not** been specified this is the memory temporarly allocated for the talloc debug dump file. The default value should be sufficient.
 - **log_file** (M) This is the filename govlooger writes formatted log data to. If the file fails to open no logging is performed and file open errors are reported every 30 seconds to STDOUT.
-- **log_prog_command** (undefined) An optional command (run inside /bin/bash) which can be run periodically to process logs. The program is executed once a rotated log file has no threads writing and is closed. The command is run using /bin/sh hence shell redirections and pipes can be used where approriate. As log events may span several lines the post processing script may need to maintain state.
-- **log_prog_keep_stderr** (no) If true (yes) the stderr from the **log_prog_command** will return to the freeradius instance,
-else it is directed to /dev/null.
-- **log_prog_nice** The nice level to run the **log_prog_coomand**, by increasing the nice level it lowers the impact on the freeradius server during logfile processing. (Recommend 10).
+- **log_prog_command** (undefined) An optional command (run inside /bin/bash) which can be run periodically to process the rotated logfile. The program is executed once a rotated log file has no threads writing and is closed. The command is run using /bin/sh so shell redirections and pipes can be used where approriate. As log events may span several lines the post processing script should maintain state.
+- **log_prog_keep_stderr** (no) If true (yes) stderr output from the **log_prog_command** returns to the current stderr stream, else it directed to /dev/null.
+- **log_prog_nice** The nice level to run the **log_prog_coomand**, by increasing the nice level it lowers the impact on the freeradius server when the **log_prog_command** is executed. Recommended value 10.
 - **rotated_log_file** (M) The name of the rotated log file.
 - **rotate_interval** (20) The time in seconds between successive log rotations. This time may be longer if the system is busy.
 - **talloc_debug_filename** The module dumps the talloc debug information to a memory mapped file then parses the file to find the location of the eap module configuration to access the session count information. If you wish to see the talloc memory data you can specify a file to use.
-- **warn_if_rotated_file_present** (no) If true (yes) and when rotating the current log file it still exists a radius error is produced. If set it is important the log processing command deleted the rotated log file on success.
-
+- **warn_if_rotated_file_present** (no) If true (yes) when rotating the current log file if the rotated log file exists a radius error is produced. If true it is important the log processing command deletes the rotated log file on success.
 
 ### The **encode** json xlat configuration
 
@@ -257,19 +255,23 @@ govlogger {
 	}
 
     log_file = "govlogs.log"
-
-    # How long for log rotate program to wait to ensure file closed...
-    rotate_wait_seconds = 5
+    rotated_log_file = "govlogs.rotated"
 
     # How often we run the log process script
     log_prog_interval_seconds = 10
 
     # The script for handling the logs
-    # Stderr should go somewhere sensible and stdout could go through a pipe somewhere
-    log_prog_command = "/usr/bin/process_gov_logs --pretty --canonical --state /healthcheck/statefile --reduce_last_date_only --reduce_drop_eap_peap --wait 6 --logfile ${log_file} >> /healthcheck/reduced_logs.out 2>>/healthcheck/process_gov_logs.err"
+    # The --pretty --canonical are in here to make it look nice but it increases data size - leave out for production
+    log_prog_command = "/usr/bin/process_gov_logs --pretty --canonical --state /healthcheck/statefile --reduce_duplicates --reduce_freeradius_proxied --reduce_last_date_only --reduce_drop_eap_peap --delete --wait 6 --logfile ${rotated_log_file} >> /healthcheck/reduced_logs.out"
 
     # By lowering the nice level we do not affect freeradius operation
     log_prog_nice = 10
+
+    # Warn if the file still exists on next rotate (can be caused by crash in above script)
+    warn_if_rotated_file_present = yes
+
+    # Send stderr to output - then appears in docker log
+    log_prog_keep_stderr = yes
 
     post-auth {
         govlogger_line = "%c.%M post-auth: {\"State\":\"%{State}\",\"Request\":%{govlogger_json:request:[*] !EAP-Message !Message-Authenticator !Service-Type !MS-CHAP-Challenge !MS-CHAP2-Response !TLS-Cert-Valid-Since !TLS-Cert-Common-Name !TLS-Cert-Issuer !TLS-Cert-Subject !TLS-Client-Cert-Common-Name !TLS-Client-Cert-Issuer !TLS-Client-Cert-Subject !TLS-Client-Cert-Valid-Since !TLS-Client-Cert-X509v3-Authority-Key-Identifier !TLS-Client-Cert-X509v3-Basic-Constraints !TLS-Client-Cert-X509v3-Subject-Key-Identifier},\"Session\":%{govlogger_json:session-state:[*] !TLS-Session-Information !TLS-Session-Version !Framed-MTU},\"eap_sessions\":%{govlogger:used_sessions}}\n"
