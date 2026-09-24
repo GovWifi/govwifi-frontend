@@ -1,0 +1,9 @@
+# Build tree (FreeRADIUS clone + compiled artifacts)
+build/
+
+# Docker output artifacts
+docker/out/
+
+# Extracted local dependency packages (sudo-free .deb extraction)
+local-deps/usr/
+local-deps/etc/
