@@ -286,7 +286,7 @@ govlogger {
 ```
 
 # Building
-Due the the rather nasty use of boilermake, and outdated configure.ac files in FreeRadius 3.2.x some changes are needed to the `src/tests/all.mk` file to ensure the unit tests for the logger are run.
+Due to the rather nasty use of boilermake, and outdated configure.ac files in FreeRadius 3.2.x some changes are needed to the `src/tests/all.mk` file to ensure the unit tests for the logger are run.
 
 To build the module, download the source for FreeRadius 3.2.x and then unpack this code over the top.
 
