@@ -38,7 +38,7 @@ GEM
       racc
     prism (2.1.0-arm64-darwin)
     prism (2.1.0-x86_64-linux-gnu)
-    puma (8.0.2)
+    puma (8.1.0)
       nio4r (~> 2.0)
     racc (1.8.1)
     rack (3.2.8)
